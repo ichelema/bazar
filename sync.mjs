@@ -1450,8 +1450,9 @@ async function main() {
   // Self-populate the per-device registry on every invocation. sync.mjs
   // knows its own __dirname, so any user who runs this script gets
   // auto-registered without thinking about it. Idempotent — writePathRegistry
-  // is a no-op if the value is unchanged.
-  {
+  // is a no-op if the value is unchanged. Skipped for --link/--unlink, which
+  // manage the registry explicitly and report what they did.
+  if (!['link', 'unlink'].includes(args.command)) {
     const remote = getBazarRemote();
     if (remote) {
       try { writePathRegistry(remote, norm(BAZAR)); } catch {}
