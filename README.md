@@ -1,10 +1,10 @@
-# claude-fast-library
+# Bazar
 
 If you use Claude Code across multiple projects, you're probably copying the same skills, agents, and settings between them. When you improve a skill in one project, the others fall behind. When you set up a new project, you manually reconstruct the `.claude/` folder from memory.
 
-This library solves that. One repo holds everything. Each project picks what it needs. Changes flow both ways. The entire system is controlled through natural language via the `/library` command.
+Bazar solves that. One repo holds everything. Each project picks what it needs. Changes flow both ways. The entire system is controlled through natural language via the `/bazar` command.
 
-<p align="center"><a href="diagrams/variants.png"><img src="diagrams/variants.png" width="85%" alt="Library syncing to multiple projects" /></a></p>
+<p align="center"><a href="diagrams/variants.png"><img src="diagrams/variants.png" width="85%" alt="Bazar syncing to multiple projects" /></a></p>
 
 ## Getting Started
 
@@ -12,12 +12,12 @@ You need [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and the [
 
 ### Option A: Start from this template (recommended)
 
-1. Download the [`library.md`](commands/library.md) command file
-2. Place it at `.claude/commands/library.md` in any project
+1. Download the [`bazar.md`](commands/bazar.md) command file
+2. Place it at `.claude/commands/bazar.md` in any project
 3. Open Claude Code and say:
 
 ```
-/library let's set up my own library
+/bazar let's set up my own bazar
 ```
 
 Claude will:
@@ -31,17 +31,17 @@ Claude will:
 
 ```bash
 # Create your private repo from this template
-gh repo create my-library --template Abdo-El-Mobayad/claude-fast-library --private --clone
+gh repo create my-bazar --template ichelema/bazar --private --clone
 
 # In your project, init and sync
 cd my-project
-node ../my-library/sync.mjs --seed --name "CLAUDE--my-project"
+node ../my-bazar/sync.mjs --seed --name "CLAUDE--my-project"
 
-# Register the library path on this device (one-time per machine)
-node ../my-library/sync.mjs --link
+# Register the bazar path on this device (one-time per machine)
+node ../my-bazar/sync.mjs --link
 ```
 
-After either option, everything is `/library` from here on.
+After either option, everything is `/bazar` from here on.
 
 ## What It Manages
 
@@ -57,39 +57,39 @@ After either option, everything is `/library` from here on.
 | **MCP configs** | Model Context Protocol servers        | `.mcp.json` per project/platform                |
 | **Files**       | Anything else                         | justfile, .gitignore, .editorconfig             |
 
-## Using /library
+## Using /bazar
 
-Once set up, `/library` is your single interface. Just talk:
+Once set up, `/bazar` is your single interface. Just talk:
 
 ```
-/library sync                                --> Pull latest from library
-/library what's out of sync?                 --> Show diff table
-/library push my changes                     --> Push with confirmation
-/library add the payment-processing skill    --> Add to this project
-/library I built a new skill, add it         --> Create new library item
-/library create a variant of react           --> Project-specific version
-/library set up my-new-repo                  --> Connect another project
-/library create a profile called minimal     --> Reusable item selection
-/library add react to the dev profile        --> Update a profile
-/library is auto-sync working?               --> Check LibraryHook status
-/library show everything                     --> Full inventory
+/bazar sync                                --> Pull latest from the bazar
+/bazar what's out of sync?                 --> Show diff table
+/bazar push my changes                     --> Push with confirmation
+/bazar add the payment-processing skill    --> Add to this project
+/bazar I built a new skill, add it         --> Create new bazar item
+/bazar create a variant of react           --> Project-specific version
+/bazar set up my-new-repo                  --> Connect another project
+/bazar create a profile called minimal     --> Reusable item selection
+/bazar add react to the dev profile        --> Update a profile
+/bazar is auto-sync working?               --> Check BazarHook status
+/bazar show everything                     --> Full inventory
 ```
 
 ## How Sync Works
 
-**Sync** pulls from the library into your project. **Push** sends your local edits back.
+**Sync** pulls from the bazar into your project. **Push** sends your local edits back.
 
 ```
-Library ----sync----> Project     (library overwrites project)
-Library <---push----- Project     (project overwrites library)
-Library <---diff----> Project     (compare only, no changes)
+Bazar ----sync----> Project     (bazar overwrites project)
+Bazar <---push----- Project     (project overwrites bazar)
+Bazar <---diff----> Project     (compare only, no changes)
 ```
 
 ```bash
 node sync.mjs                              # sync current directory
 node sync.mjs --push                       # push all changes
 node sync.mjs --push -y                    # push without confirmation
-node sync.mjs --diff                       # compare project vs library
+node sync.mjs --diff                       # compare project vs bazar
 node sync.mjs --all                        # sync every mapped project
 node sync.mjs --list                       # show full inventory
 node sync.mjs --add skills react           # add item to this project
@@ -100,11 +100,11 @@ node sync.mjs --seed --name "CLAUDE--app"  # import existing project
 
 ## Variants
 
-The same skill can have different versions for different projects. Variants use a `name--suffix` convention in the library but deploy under the base name.
+The same skill can have different versions for different projects. Variants use a `name--suffix` convention in the bazar but deploy under the base name.
 
 <p align="center"><a href="diagrams/hero-architecture.png"><img src="diagrams/hero-architecture.png" width="85%" alt="Variant resolution" /></a></p>
 
-| In the library          | Deployed as             | Who gets it                        |
+| In the bazar            | Deployed as             | Who gets it                        |
 | ----------------------- | ----------------------- | ---------------------------------- |
 | `skills/react/`         | `.claude/skills/react/` | Projects mapping `"react"`         |
 | `skills/react--strict/` | `.claude/skills/react/` | Projects mapping `"react--strict"` |
@@ -130,8 +130,8 @@ Define profiles in `map.json`:
     "dev": {
       "skills": ["react", "git-commits", "auth"],
       "agents": ["backend-engineer", "frontend-specialist"],
-      "commands": ["build", "team-plan", "library"],
-      "hooks": ["SkillActivationHook", "FormatterHook", "LibraryHook"],
+      "commands": ["build", "team-plan", "bazar"],
+      "hooks": ["SkillActivationHook", "FormatterHook", "BazarHook"],
       "rules": ["repo-primer--dev"],
       "claude-md": "CLAUDE--dev",
       "settings": "settings--dev"
@@ -142,29 +142,30 @@ Define profiles in `map.json`:
 
 ## Auto-Sync
 
-The LibraryHook automatically pushes local edits back to the library. No manual push needed.
+The BazarHook keeps project and bazar aligned without manual pushes.
 
-**Two triggers:**
+**Two drivers:**
 
-- **PostToolUse**: Fires when Claude edits a managed file
-- **UserPromptSubmit**: Fires on each prompt, catches IDE/terminal edits via mtime scan
+- **Stop** (`bazar-sync.mjs`): runs at the end of every Claude turn. A cheap mtime scan over managed files detects local edits (by Claude, IDE, or terminal) and pushes them to the bazar synchronously.
+- **SessionStart** (`bazar-session-start.mjs`): runs on startup/resume. Pushes any pending local edits first, then syncs bazar -> project. If the push is refused, the sync is skipped so local edits are never overwritten.
 
-**180-second debounce**: rapid edits are batched into a single library commit. The worker is detached, so the push completes even if the session closes.
+Both auto-pushes are additive: they never delete bazar files that are absent on this device.
 
-Disable/enable via `/library disable auto-sync` or `/library enable auto-sync`.
+Disable/enable via `/bazar disable auto-sync` or `/bazar enable auto-sync`.
 
 ## Repository Structure
 
 ```
-your-library/
+your-bazar/
 ├── sync.mjs                  # CLI engine (pure Node.js, zero deps)
 ├── map.json                  # Project and profile definitions
+├── lib/                      # Shared helper modules used by sync.mjs
 ├── skills/                   # Skill folders (SKILL.md + supporting files)
 ├── agents/                   # Agent definitions (.md files)
 ├── commands/                 # Slash commands (.md files)
-│   └── library.md            # The /library command itself
+│   └── bazar.md              # The /bazar command itself
 ├── hooks/                    # Hook systems (folders with .mjs files)
-│   └── LibraryHook/          # Auto-sync hook (included)
+│   └── BazarHook/            # Auto-sync hook (included)
 ├── rules/                    # Rule files (.md, one per project variant)
 ├── claude-mds/               # CLAUDE.md files (one per project/profile)
 ├── settings/                 # settings.json files (one per project/profile)
@@ -180,8 +181,8 @@ your-library/
 - **Git integration.** Sync pulls before operating. Push commits and pushes automatically
 - **Hash-based diff.** MD5 comparison for files and directories
 - **Ignore patterns.** Configure in `map.json` to exclude runtime artifacts from sync
-- **Per-device library path** stored in `~/.claude/library-paths.json` (gitignored, never shipped). Run `node sync.mjs --link` once per machine to register.
+- **Per-device bazar path** stored in `~/.claude/bazar-paths.json` (gitignored, never shipped). Run `node sync.mjs --link` once per machine to register. The `CLAUDE_BAZAR_PATH` environment variable overrides it.
 
 ## Credits
 
-Built as part of [Claude Fast](https://claudefa.st) -- an AI development management system for Claude Code.
+Derived from [claude-fast-library](https://github.com/Abdo-El-Mobayad/claude-fast-library) by Abdo El Mobayad, part of [Claude Fast](https://claudefa.st) -- an AI development management system for Claude Code.

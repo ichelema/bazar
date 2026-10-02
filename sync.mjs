@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 /**
- * sync.mjs - Claude Library Sync Tool
- * Manages .claude folder content across multiple projects from a central library.
+ * sync.mjs - Bazar Sync Tool
+ * Manages .claude folder content across multiple projects from a central bazar.
  * Pure Node.js, no external dependencies.
  */
 
@@ -15,13 +15,13 @@ import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
-import { writePathRegistry, removePathRegistryEntry, readPathRegistry } from './lib/library-path-resolver.mjs';
+import { writePathRegistry, removePathRegistryEntry, readPathRegistry } from './lib/bazar-path-resolver.mjs';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const LIB = __dirname;
+const BAZAR = __dirname;
 
 const CATEGORIES = ['skills', 'agents', 'commands', 'hooks', 'rules'];
 const DIR_CATEGORIES = ['skills', 'hooks'];
@@ -129,9 +129,9 @@ function hashPath(itemPath, ignorePatterns = []) {
 
 // ── Path Resolution ──────────────────────────────────────────────────────────
 
-function libItemPath(category, fullName) {
-  if (DIR_CATEGORIES.includes(category)) return join(LIB, category, fullName);
-  return join(LIB, category, fullName + '.md');
+function bazarItemPath(category, fullName) {
+  if (DIR_CATEGORIES.includes(category)) return join(BAZAR, category, fullName);
+  return join(BAZAR, category, fullName + '.md');
 }
 
 function projItemPath(projectRoot, category, deployName) {
@@ -139,41 +139,28 @@ function projItemPath(projectRoot, category, deployName) {
   return join(projectRoot, '.claude', category, deployName + '.md');
 }
 
-const MANIFEST_FILENAME = 'library.json';
-const LEGACY_MANIFEST_FILENAME = '.library-manifest.json';
+const MANIFEST_FILENAME = 'bazar.json';
 
 function manifestPath(projectRoot) {
   return join(projectRoot, '.claude', MANIFEST_FILENAME);
-}
-
-function legacyManifestPath(projectRoot) {
-  return join(projectRoot, '.claude', LEGACY_MANIFEST_FILENAME);
-}
-
-function resolveManifestPath(projectRoot) {
-  const current = manifestPath(projectRoot);
-  if (existsSync(current)) return current;
-  const legacy = legacyManifestPath(projectRoot);
-  if (existsSync(legacy)) return legacy;
-  return current;
 }
 
 // ── Git Operations ───────────────────────────────────────────────────────────
 
 function gitPull() {
   try {
-    execSync('git pull --ff-only', { cwd: LIB, stdio: 'pipe' });
+    execSync('git pull --ff-only', { cwd: BAZAR, stdio: 'pipe' });
     return true;
   } catch { return false; }
 }
 
 function gitCommitAndPush(message) {
   try {
-    execSync('git add -A', { cwd: LIB, stdio: 'pipe' });
-    const status = execSync('git status --porcelain', { cwd: LIB, encoding: 'utf8' });
+    execSync('git add -A', { cwd: BAZAR, stdio: 'pipe' });
+    const status = execSync('git status --porcelain', { cwd: BAZAR, encoding: 'utf8' });
     if (!status.trim()) { console.log('  No changes to commit'); return false; }
-    execSync(`git commit -m "${message}"`, { cwd: LIB, stdio: 'pipe' });
-    try { execSync('git push', { cwd: LIB, stdio: 'pipe' }); } catch { /* no remote yet */ }
+    execSync(`git commit -m "${message}"`, { cwd: BAZAR, stdio: 'pipe' });
+    try { execSync('git push', { cwd: BAZAR, stdio: 'pipe' }); } catch { /* no remote yet */ }
     return true;
   } catch (e) {
     console.error('  Git error:', e.message);
@@ -181,30 +168,30 @@ function gitCommitAndPush(message) {
   }
 }
 
-function getLibCommit() {
-  try { return execSync('git rev-parse --short HEAD', { cwd: LIB, encoding: 'utf8' }).trim(); }
+function getBazarCommit() {
+  try { return execSync('git rev-parse --short HEAD', { cwd: BAZAR, encoding: 'utf8' }).trim(); }
   catch { return 'none'; }
 }
 
-function isLibCommitAncestor(commit) {
+function isBazarCommitAncestor(commit) {
   if (!/^[0-9a-f]{7,40}$/i.test(commit || '')) return null;
   try {
-    execSync(`git merge-base --is-ancestor ${commit} HEAD`, { cwd: LIB, stdio: 'pipe' });
+    execSync(`git merge-base --is-ancestor ${commit} HEAD`, { cwd: BAZAR, stdio: 'pipe' });
     return true;
   } catch {
     return false;
   }
 }
 
-function getLibRemote() {
-  try { return execSync('git remote get-url origin', { cwd: LIB, encoding: 'utf8' }).trim(); }
+function getBazarRemote() {
+  try { return execSync('git remote get-url origin', { cwd: BAZAR, encoding: 'utf8' }).trim(); }
   catch { return ''; }
 }
 
 // ── Map Operations ───────────────────────────────────────────────────────────
 
-function readMap() { return readJSON(join(LIB, 'map.json')); }
-function writeMap(map) { writeJSON(join(LIB, 'map.json'), map); }
+function readMap() { return readJSON(join(BAZAR, 'map.json')); }
+function writeMap(map) { writeJSON(join(BAZAR, 'map.json'), map); }
 
 function findProject(map, targetPath) {
   const normTarget = norm(resolve(targetPath));
@@ -218,7 +205,7 @@ function emptyConfig() {
   return { 'claude-md': '', settings: '', mcp: '', skills: [], agents: [], commands: [], hooks: [], rules: [], files: {}, 'gitignore-lines': [] };
 }
 
-// ── SYNC (library -> project) ────────────────────────────────────────────────
+// ── SYNC (bazar -> project) ────────────────────────────────────────────────
 
 function syncProject(projectRoot, map) {
   const entry = findProject(map, projectRoot);
@@ -231,22 +218,11 @@ function syncProject(projectRoot, map) {
   const claudeDir = join(projectRoot, '.claude');
   ensureDir(claudeDir);
 
-  // Read old manifest for cleanup (handle legacy filename too)
+  // Read old manifest for cleanup
   let oldManifest = null;
   const mPath = manifestPath(projectRoot);
-  const legacyPath = legacyManifestPath(projectRoot);
-  const readPath = existsSync(mPath) ? mPath : (existsSync(legacyPath) ? legacyPath : null);
-  if (readPath) {
-    try { oldManifest = readJSON(readPath); } catch {}
-  }
-
-  // Graceful migration: legacy manifests carry a per-machine `library_path`
-  // field. If it points to a valid directory on this device, register it
-  // into the per-device registry before we drop the field on the next write.
-  if (oldManifest?.library_path && existsSync(oldManifest.library_path)) {
-    try {
-      writePathRegistry(oldManifest.library_remote || getLibRemote(), norm(oldManifest.library_path));
-    } catch {}
+  if (existsSync(mPath)) {
+    try { oldManifest = readJSON(mPath); } catch {}
   }
 
   const managed = {};
@@ -258,15 +234,15 @@ function syncProject(projectRoot, map) {
 
     for (const itemName of items) {
       const { deploy, full } = parseItemName(itemName);
-      const src = libItemPath(cat, full);
+      const src = bazarItemPath(cat, full);
       const dest = projItemPath(projectRoot, cat, deploy);
 
       if (!existsSync(src)) {
-        console.warn(`  SKIP: ${cat}/${full} not in library`);
+        console.warn(`  SKIP: ${cat}/${full} not in bazar`);
         continue;
       }
 
-      // Deploy is library -> project: library is the source of truth, so mirror
+      // Deploy is bazar -> project: bazar is the source of truth, so mirror
       // (prune=true) to remove files deleted upstream.
       if (DIR_CATEGORIES.includes(cat)) pushDirSyncIgnoreAware(src, dest, getIgnorePatterns(full, map.ignore), true);
       else copyFile(src, dest);
@@ -278,42 +254,42 @@ function syncProject(projectRoot, map) {
 
   // Sync claude-md
   if (config['claude-md']) {
-    const src = join(LIB, 'claude-mds', config['claude-md'] + '.md');
+    const src = join(BAZAR, 'claude-mds', config['claude-md'] + '.md');
     const dest = join(projectRoot, 'CLAUDE.md');
     if (existsSync(src)) { copyFile(src, dest); managed['claude-md'] = config['claude-md']; synced++; }
-    else console.warn(`  SKIP: claude-mds/${config['claude-md']}.md not in library`);
+    else console.warn(`  SKIP: claude-mds/${config['claude-md']}.md not in bazar`);
   }
 
   // Sync settings
   if (config.settings) {
-    const src = join(LIB, 'settings', config.settings + '.json');
+    const src = join(BAZAR, 'settings', config.settings + '.json');
     const dest = join(projectRoot, '.claude', 'settings.json');
     if (existsSync(src)) { copyFile(src, dest); managed.settings = config.settings; synced++; }
-    else console.warn(`  SKIP: settings/${config.settings}.json not in library`);
+    else console.warn(`  SKIP: settings/${config.settings}.json not in bazar`);
   }
 
   // Sync mcp
   if (config.mcp) {
-    const src = join(LIB, 'mcp-configs', config.mcp + '.json');
+    const src = join(BAZAR, 'mcp-configs', config.mcp + '.json');
     const dest = join(projectRoot, '.mcp.json');
     if (existsSync(src)) { copyFile(src, dest); managed.mcp = config.mcp; synced++; }
-    else console.warn(`  SKIP: mcp-configs/${config.mcp}.json not in library`);
+    else console.warn(`  SKIP: mcp-configs/${config.mcp}.json not in bazar`);
   }
 
   // Sync files
   managed.files = {};
   const files = config.files || {};
-  for (const [libName, deployPath] of Object.entries(files)) {
-    const src = join(LIB, 'files', libName);
+  for (const [bazarName, deployPath] of Object.entries(files)) {
+    const src = join(BAZAR, 'files', bazarName);
     const dest = join(projectRoot, deployPath);
 
     if (!existsSync(src)) {
-      console.warn(`  SKIP: files/${libName} not in library`);
+      console.warn(`  SKIP: files/${bazarName} not in bazar`);
       continue;
     }
 
     copyFile(src, dest);
-    managed.files[libName] = deployPath;
+    managed.files[bazarName] = deployPath;
     synced++;
   }
 
@@ -323,7 +299,7 @@ function syncProject(projectRoot, map) {
     const giPath = join(projectRoot, '.gitignore');
     let existing = '';
     if (existsSync(giPath)) existing = readFileSync(giPath, 'utf8');
-    const marker = '# claude-library managed';
+    const marker = '# bazar managed';
     const missing = gitignoreLines.filter(line => !existing.includes(line));
     if (missing.length) {
       const markerLine = existing.includes(marker) ? '' : marker + '\n';
@@ -349,10 +325,10 @@ function syncProject(projectRoot, map) {
     // Cleanup old files
     const oldFiles = oldManifest.managed.files || {};
     const newFiles = managed.files || {};
-    for (const [oldLib, oldDeploy] of Object.entries(oldFiles)) {
-      if (!(oldLib in newFiles)) {
+    for (const [oldBazarName, oldDeploy] of Object.entries(oldFiles)) {
+      if (!(oldBazarName in newFiles)) {
         deleteItem(join(projectRoot, oldDeploy));
-        console.log(`  Removed: files/${oldLib} (${oldDeploy})`);
+        console.log(`  Removed: files/${oldBazarName} (${oldDeploy})`);
       }
     }
   }
@@ -373,22 +349,17 @@ function syncProject(projectRoot, map) {
   if (ruleCount) console.log(`  Generated ${ruleCount} rule file(s)`);
 
   // Write manifest
-  // Note: `library_path` is intentionally OMITTED. The per-device path is
-  // resolved at runtime via `~/.claude/library-paths.json` (keyed by
-  // `library_remote`) so the manifest stays portable across machines.
+  // Note: the bazar path is intentionally NOT stored here. The per-device path is
+  // resolved at runtime via `~/.claude/bazar-paths.json` (keyed by
+  // `bazar_remote`) so the manifest stays portable across machines.
   const manifest = {
-    library_remote: getLibRemote(),
+    bazar_remote: getBazarRemote(),
     synced_at: new Date().toISOString(),
-    library_commit: getLibCommit(),
+    bazar_commit: getBazarCommit(),
     managed
   };
   manifest.base_hashes = computeBaseHashes(projectRoot, manifest);
   writeJSON(mPath, manifest);
-
-  // Remove legacy manifest if it still exists (one-time migration)
-  if (existsSync(legacyPath)) {
-    try { unlinkSync(legacyPath); console.log(`  Removed legacy ${LEGACY_MANIFEST_FILENAME}`); } catch {}
-  }
 
   console.log(`  Synced ${synced} items -> ${norm(projectRoot)}`);
   return manifest;
@@ -400,7 +371,7 @@ function generateRuleFiles(projectRoot, config) {
   let generated = 0;
 
   // Generate skill-rules.json
-  const masterSkills = join(LIB, 'master-skill-rules.json');
+  const masterSkills = join(BAZAR, 'master-skill-rules.json');
   if (existsSync(masterSkills)) {
     const master = readJSON(masterSkills);
     const projectSkills = (config.skills || []).map(s => parseItemName(s).deploy);
@@ -434,7 +405,7 @@ function generateRuleFiles(projectRoot, config) {
   }
 
   // Generate agent-rules.json
-  const masterAgents = join(LIB, 'master-agent-rules.json');
+  const masterAgents = join(BAZAR, 'master-agent-rules.json');
   if (existsSync(masterAgents)) {
     const master = readJSON(masterAgents);
     const projectAgents = (config.agents || []).map(a => parseItemName(a).deploy);
@@ -475,7 +446,7 @@ function pushRuleFiles(projectRoot) {
 
   // Push skill-rules.json changes back to master
   const skillRulesPath = join(projectRoot, '.claude', 'skills', 'skill-rules.json');
-  const masterSkillsPath = join(LIB, 'master-skill-rules.json');
+  const masterSkillsPath = join(BAZAR, 'master-skill-rules.json');
   if (existsSync(skillRulesPath) && existsSync(masterSkillsPath)) {
     const local = readJSON(skillRulesPath);
     const master = readJSON(masterSkillsPath);
@@ -504,7 +475,7 @@ function pushRuleFiles(projectRoot) {
 
   // Push agent-rules.json changes back to master
   const agentRulesPath = join(projectRoot, '.claude', 'agents', 'agent-rules.json');
-  const masterAgentsPath = join(LIB, 'master-agent-rules.json');
+  const masterAgentsPath = join(BAZAR, 'master-agent-rules.json');
   if (existsSync(agentRulesPath) && existsSync(masterAgentsPath)) {
     const local = readJSON(agentRulesPath);
     const master = readJSON(masterAgentsPath);
@@ -574,7 +545,7 @@ function findDestOnly(src, dest, patterns = []) {
     .filter(rel => !existsSync(join(src, rel)));
 }
 
-// Push a directory item (project -> library, or library -> project on deploy).
+// Push a directory item (project -> bazar, or bazar -> project on deploy).
 //   prune=false (default): ADDITIVE. Overlay src onto dest; never delete files
 //     that exist in dest but are absent from src. This is the safe default that
 //     stops one device from clobbering another's content when two devices have
@@ -599,7 +570,7 @@ function pushDirSyncIgnoreAware(src, dest, patterns = [], prune = false) {
 // ── Change Detection ────────────────────────────────────────────────────────
 
 function getChangedItems(projectRoot) {
-  const mPath = resolveManifestPath(projectRoot);
+  const mPath = manifestPath(projectRoot);
   if (!existsSync(mPath)) return [];
 
   const manifest = readJSON(mPath);
@@ -611,33 +582,33 @@ function getChangedItems(projectRoot) {
     for (const [deploy, full] of Object.entries(items)) {
       const patterns = DIR_CATEGORIES.includes(cat) ? (ignoreMap[deploy] || []) : [];
       const projHash = hashPath(projItemPath(projectRoot, cat, deploy), patterns);
-      const libHash = hashPath(libItemPath(cat, full), patterns);
+      const bazarHash = hashPath(bazarItemPath(cat, full), patterns);
       if (!projHash) continue;
-      if (!libHash) changed.push({ category: cat, deploy, full, status: 'local-only' });
-      else if (projHash !== libHash) changed.push({ category: cat, deploy, full, status: 'changed' });
+      if (!bazarHash) changed.push({ category: cat, deploy, full, status: 'local-only' });
+      else if (projHash !== bazarHash) changed.push({ category: cat, deploy, full, status: 'changed' });
     }
   }
 
   if (manifest.managed['claude-md']) {
     const ph = hashPath(join(projectRoot, 'CLAUDE.md'));
-    const lh = hashPath(join(LIB, 'claude-mds', manifest.managed['claude-md'] + '.md'));
+    const lh = hashPath(join(BAZAR, 'claude-mds', manifest.managed['claude-md'] + '.md'));
     if (ph && lh && ph !== lh) changed.push({ category: 'claude-md', deploy: 'CLAUDE.md', full: manifest.managed['claude-md'], status: 'changed' });
   }
   if (manifest.managed.settings) {
     const ph = hashPath(join(projectRoot, '.claude', 'settings.json'));
-    const lh = hashPath(join(LIB, 'settings', manifest.managed.settings + '.json'));
+    const lh = hashPath(join(BAZAR, 'settings', manifest.managed.settings + '.json'));
     if (ph && lh && ph !== lh) changed.push({ category: 'settings', deploy: 'settings.json', full: manifest.managed.settings, status: 'changed' });
   }
   if (manifest.managed.mcp) {
     const ph = hashPath(join(projectRoot, '.mcp.json'));
-    const lh = hashPath(join(LIB, 'mcp-configs', manifest.managed.mcp + '.json'));
+    const lh = hashPath(join(BAZAR, 'mcp-configs', manifest.managed.mcp + '.json'));
     if (ph && lh && ph !== lh) changed.push({ category: 'mcp', deploy: '.mcp.json', full: manifest.managed.mcp, status: 'changed' });
   }
   const files = manifest.managed.files || {};
-  for (const [libName, deployPath] of Object.entries(files)) {
+  for (const [bazarName, deployPath] of Object.entries(files)) {
     const ph = hashPath(join(projectRoot, deployPath));
-    const lh = hashPath(join(LIB, 'files', libName));
-    if (ph && lh && ph !== lh) changed.push({ category: 'files', deploy: deployPath, full: libName, status: 'changed' });
+    const lh = hashPath(join(BAZAR, 'files', bazarName));
+    if (ph && lh && ph !== lh) changed.push({ category: 'files', deploy: deployPath, full: bazarName, status: 'changed' });
   }
 
   return changed;
@@ -648,21 +619,21 @@ function itemPaths(projectRoot, manifest, item) {
   if (CATEGORIES.includes(item.category)) {
     return {
       src: projItemPath(projectRoot, item.category, item.deploy),
-      dest: libItemPath(item.category, item.full),
+      dest: bazarItemPath(item.category, item.full),
       patterns: DIR_CATEGORIES.includes(item.category) ? (ignoreMap[item.deploy] || []) : []
     };
   }
-  if (item.category === 'claude-md') return { src: join(projectRoot, 'CLAUDE.md'), dest: join(LIB, 'claude-mds', item.full + '.md'), patterns: [] };
-  if (item.category === 'settings') return { src: join(projectRoot, '.claude', 'settings.json'), dest: join(LIB, 'settings', item.full + '.json'), patterns: [] };
-  if (item.category === 'mcp') return { src: join(projectRoot, '.mcp.json'), dest: join(LIB, 'mcp-configs', item.full + '.json'), patterns: [] };
-  if (item.category === 'files') return { src: join(projectRoot, item.deploy), dest: join(LIB, 'files', item.full), patterns: [] };
+  if (item.category === 'claude-md') return { src: join(projectRoot, 'CLAUDE.md'), dest: join(BAZAR, 'claude-mds', item.full + '.md'), patterns: [] };
+  if (item.category === 'settings') return { src: join(projectRoot, '.claude', 'settings.json'), dest: join(BAZAR, 'settings', item.full + '.json'), patterns: [] };
+  if (item.category === 'mcp') return { src: join(projectRoot, '.mcp.json'), dest: join(BAZAR, 'mcp-configs', item.full + '.json'), patterns: [] };
+  if (item.category === 'files') return { src: join(projectRoot, item.deploy), dest: join(BAZAR, 'files', item.full), patterns: [] };
   return null;
 }
 
 function computeBaseHashes(projectRoot, manifest) {
-  // Records the agreed two-sided state ({proj, lib} hash per item) after a
+  // Records the agreed two-sided state ({proj, bazar} hash per item) after a
   // sync or push, so a later push can detect both-sides-changed divergence
-  // instead of silently clobbering a library item with a stale local copy.
+  // instead of silently clobbering a bazar item with a stale local copy.
   const hashes = {};
   const managed = manifest.managed;
   const items = [];
@@ -672,13 +643,13 @@ function computeBaseHashes(projectRoot, manifest) {
   if (managed['claude-md']) items.push({ category: 'claude-md', deploy: 'CLAUDE.md', full: managed['claude-md'] });
   if (managed.settings) items.push({ category: 'settings', deploy: 'settings.json', full: managed.settings });
   if (managed.mcp) items.push({ category: 'mcp', deploy: '.mcp.json', full: managed.mcp });
-  for (const [libName, deployPath] of Object.entries(managed.files || {})) items.push({ category: 'files', deploy: deployPath, full: libName });
+  for (const [bazarName, deployPath] of Object.entries(managed.files || {})) items.push({ category: 'files', deploy: deployPath, full: bazarName });
   for (const item of items) {
     const p = itemPaths(projectRoot, manifest, item);
     if (!p) continue;
     const proj = hashPath(p.src, p.patterns);
-    const lib = hashPath(p.dest, p.patterns);
-    if (proj || lib) hashes[`${item.category}/${item.full}`] = { proj, lib };
+    const bazar = hashPath(p.dest, p.patterns);
+    if (proj || bazar) hashes[`${item.category}/${item.full}`] = { proj, bazar };
   }
   return hashes;
 }
@@ -688,22 +659,22 @@ function checkPushPrecondition(projectRoot, manifest, item) {
   if (!paths) return { ok: false, reason: 'unresolved-path' };
 
   const base = (manifest.base_hashes || {})[`${item.category}/${item.full}`];
-  const libHash = hashPath(paths.dest, paths.patterns);
+  const bazarHash = hashPath(paths.dest, paths.patterns);
   const hasCompleteBase = base
     && Object.prototype.hasOwnProperty.call(base, 'proj')
-    && Object.prototype.hasOwnProperty.call(base, 'lib');
+    && Object.prototype.hasOwnProperty.call(base, 'bazar');
 
   // A missing base is safe only when the destination is also missing. That is
-  // a genuinely new library item. If the destination exists, the manifest is
+  // a genuinely new bazar item. If the destination exists, the manifest is
   // legacy or incomplete and there is no safe expected value to compare.
   if (!hasCompleteBase) {
-    return libHash === null
+    return bazarHash === null
       ? { ok: true, reason: null }
       : { ok: false, reason: 'missing-base' };
   }
 
   const projHash = hashPath(paths.src, paths.patterns);
-  if (libHash === base.lib) return { ok: true, reason: null };
+  if (bazarHash === base.bazar) return { ok: true, reason: null };
   return { ok: false, reason: projHash === base.proj ? 'stale' : 'conflict' };
 }
 
@@ -718,10 +689,10 @@ function confirm(message) {
   });
 }
 
-// ── PUSH (project -> library) ────────────────────────────────────────────────
+// ── PUSH (project -> bazar) ────────────────────────────────────────────────
 
 async function pushProject(projectRoot, categoryFilter, itemFilter, skipConfirm, prune = false, force = false) {
-  const mPath = resolveManifestPath(projectRoot);
+  const mPath = manifestPath(projectRoot);
   if (!existsSync(mPath)) { console.error('  No manifest. Run sync first.'); process.exit(1); }
   const manifest = readJSON(mPath);
   const ignoreMap = manifest.managed.ignore || {};
@@ -732,9 +703,9 @@ async function pushProject(projectRoot, categoryFilter, itemFilter, skipConfirm,
     return;
   }
 
-  const ancestor = isLibCommitAncestor(manifest.library_commit);
+  const ancestor = isBazarCommitAncestor(manifest.bazar_commit);
   if (!force && ancestor === false) {
-    console.error(`  REFUSED: manifest library_commit ${manifest.library_commit} is not an ancestor of library HEAD.`);
+    console.error(`  REFUSED: manifest bazar_commit ${manifest.bazar_commit} is not an ancestor of bazar HEAD.`);
     console.error('  Sync first, or use a targeted --force only for a deliberate rollback.');
     process.exitCode = 1;
     return;
@@ -772,19 +743,19 @@ async function pushProject(projectRoot, categoryFilter, itemFilter, skipConfirm,
   }
 
   if (missingBase.length) {
-    console.log('\n  NO BASE: library item exists but this project has no complete base. Skipped:');
+    console.log('\n  NO BASE: bazar item exists but this project has no complete base. Skipped:');
     for (const item of missingBase) console.log(`    ${item.category}/${item.deploy}`);
-    console.log('  Sync to adopt the library state, or use a targeted --force for a deliberate rollback.');
+    console.log('  Sync to adopt the bazar state, or use a targeted --force for a deliberate rollback.');
   }
   if (stale.length) {
-    console.log('\n  STALE (library moved on, nothing authored here). Not pushed:');
+    console.log('\n  STALE (bazar moved on, nothing authored here). Not pushed:');
     for (const s of stale) console.log(`    ${s.category}/${s.deploy}`);
     console.log('  Run a plain sync to bring this project up to date.');
   }
   if (conflicts.length) {
     console.log('\n  CONFLICT: both sides changed since this project last synced. Skipped:');
     for (const c of conflicts) console.log(`    ${c.category}/${c.deploy}`);
-    console.log('  Resolve per item: run a plain sync to take the library version,');
+    console.log('  Resolve per item: run a plain sync to take the bazar version,');
     console.log("  or add --force to a targeted push to take this device's version.");
   }
   if (unresolved.length) {
@@ -818,7 +789,7 @@ async function pushProject(projectRoot, categoryFilter, itemFilter, skipConfirm,
     if (!paths || !existsSync(paths.src)) continue;
 
     // Re-check immediately before the write. A concurrent push may have moved
-    // the library after preflight or while the confirmation prompt was open.
+    // the bazar after preflight or while the confirmation prompt was open.
     if (!force) {
       const result = checkPushPrecondition(projectRoot, manifest, item);
       if (!result.ok) {
@@ -831,7 +802,7 @@ async function pushProject(projectRoot, categoryFilter, itemFilter, skipConfirm,
       if (!prune) {
         const preserved = findDestOnly(paths.src, paths.dest, paths.patterns);
         if (preserved.length) {
-          console.log(`    preserved ${preserved.length} library-only file(s) under ${item.category}/${item.deploy} (absent on this device):`);
+          console.log(`    preserved ${preserved.length} bazar-only file(s) under ${item.category}/${item.deploy} (absent on this device):`);
           for (const rel of preserved.slice(0, 10)) console.log(`      + ${rel}`);
           if (preserved.length > 10) console.log(`      ... and ${preserved.length - 10} more`);
           console.log(`      run with --prune if these deletions are intentional`);
@@ -860,8 +831,8 @@ async function pushProject(projectRoot, categoryFilter, itemFilter, skipConfirm,
       const paths = itemPaths(projectRoot, manifest, item);
       if (!paths) continue;
       const proj = hashPath(paths.src, paths.patterns);
-      const lib = hashPath(paths.dest, paths.patterns);
-      if (proj || lib) bh[`${item.category}/${item.full}`] = { proj, lib };
+      const bazar = hashPath(paths.dest, paths.patterns);
+      if (proj || bazar) bh[`${item.category}/${item.full}`] = { proj, bazar };
     }
     manifest.base_hashes = bh;
     writeJSON(mPath, manifest);
@@ -869,7 +840,7 @@ async function pushProject(projectRoot, categoryFilter, itemFilter, skipConfirm,
 
   const name = basename(projectRoot);
   const scope = categoryFilter ? `${categoryFilter}${itemFilter ? '/' + itemFilter : ''}` : 'changes';
-  console.log(`  Pushed ${pushed} item(s) to library`);
+  console.log(`  Pushed ${pushed} item(s) to bazar`);
 
   if (gitCommitAndPush(`sync: pushed ${scope} from ${name}`)) {
     console.log('  Committed and pushed');
@@ -879,7 +850,7 @@ async function pushProject(projectRoot, categoryFilter, itemFilter, skipConfirm,
 // ── DIFF ─────────────────────────────────────────────────────────────────────
 
 function diffProject(projectRoot) {
-  const mPath = resolveManifestPath(projectRoot);
+  const mPath = manifestPath(projectRoot);
   if (!existsSync(mPath)) { console.error('  No manifest. Run sync first.'); process.exit(1); }
 
   const manifest = readJSON(mPath);
@@ -891,47 +862,47 @@ function diffProject(projectRoot) {
     for (const [deploy, full] of Object.entries(items)) {
       const patterns = DIR_CATEGORIES.includes(cat) ? (ignoreMap[deploy] || []) : [];
       const projHash = hashPath(projItemPath(projectRoot, cat, deploy), patterns);
-      const libHash = hashPath(libItemPath(cat, full), patterns);
+      const bazarHash = hashPath(bazarItemPath(cat, full), patterns);
 
       let status;
-      if (!projHash && !libHash) status = 'missing';
-      else if (!projHash) status = 'library-only';
-      else if (!libHash) status = 'local-only';
-      else if (projHash === libHash) status = 'in-sync';
+      if (!projHash && !bazarHash) status = 'missing';
+      else if (!projHash) status = 'bazar-only';
+      else if (!bazarHash) status = 'local-only';
+      else if (projHash === bazarHash) status = 'in-sync';
       else status = 'changed';
 
-      rows.push({ category: cat, item: deploy, library: full, status });
+      rows.push({ category: cat, item: deploy, bazar: full, status });
     }
   }
 
   // Check claude-md and settings
   if (manifest.managed['claude-md']) {
     const ph = hashPath(join(projectRoot, 'CLAUDE.md'));
-    const lh = hashPath(join(LIB, 'claude-mds', manifest.managed['claude-md'] + '.md'));
-    rows.push({ category: 'claude-md', item: 'CLAUDE.md', library: manifest.managed['claude-md'],
+    const lh = hashPath(join(BAZAR, 'claude-mds', manifest.managed['claude-md'] + '.md'));
+    rows.push({ category: 'claude-md', item: 'CLAUDE.md', bazar: manifest.managed['claude-md'],
       status: ph === lh ? 'in-sync' : (ph && lh ? 'changed' : 'missing') });
   }
 
   if (manifest.managed.settings) {
     const ph = hashPath(join(projectRoot, '.claude', 'settings.json'));
-    const lh = hashPath(join(LIB, 'settings', manifest.managed.settings + '.json'));
-    rows.push({ category: 'settings', item: 'settings.json', library: manifest.managed.settings,
+    const lh = hashPath(join(BAZAR, 'settings', manifest.managed.settings + '.json'));
+    rows.push({ category: 'settings', item: 'settings.json', bazar: manifest.managed.settings,
       status: ph === lh ? 'in-sync' : (ph && lh ? 'changed' : 'missing') });
   }
 
   if (manifest.managed.mcp) {
     const ph = hashPath(join(projectRoot, '.mcp.json'));
-    const lh = hashPath(join(LIB, 'mcp-configs', manifest.managed.mcp + '.json'));
-    rows.push({ category: 'mcp', item: '.mcp.json', library: manifest.managed.mcp,
+    const lh = hashPath(join(BAZAR, 'mcp-configs', manifest.managed.mcp + '.json'));
+    rows.push({ category: 'mcp', item: '.mcp.json', bazar: manifest.managed.mcp,
       status: ph === lh ? 'in-sync' : (ph && lh ? 'changed' : 'missing') });
   }
 
   // Check files
   const files = manifest.managed.files || {};
-  for (const [libName, deployPath] of Object.entries(files)) {
+  for (const [bazarName, deployPath] of Object.entries(files)) {
     const ph = hashPath(join(projectRoot, deployPath));
-    const lh = hashPath(join(LIB, 'files', libName));
-    rows.push({ category: 'files', item: deployPath, library: libName,
+    const lh = hashPath(join(BAZAR, 'files', bazarName));
+    rows.push({ category: 'files', item: deployPath, bazar: bazarName,
       status: ph === lh ? 'in-sync' : (ph && lh ? 'changed' : 'missing') });
   }
 
@@ -942,16 +913,16 @@ function diffProject(projectRoot) {
 function printTable(rows) {
   if (!rows.length) { console.log('  No managed items.'); return; }
 
-  const w = { cat: 10, item: 30, lib: 35, status: 14 };
+  const w = { cat: 10, item: 30, bazar: 35, status: 14 };
   const pad = (s, n) => String(s).padEnd(n);
 
   console.log();
-  console.log(`  ${pad('CATEGORY', w.cat)} ${pad('ITEM', w.item)} ${pad('LIBRARY NAME', w.lib)} STATUS`);
-  console.log(`  ${'-'.repeat(w.cat)} ${'-'.repeat(w.item)} ${'-'.repeat(w.lib)} ${'-'.repeat(w.status)}`);
+  console.log(`  ${pad('CATEGORY', w.cat)} ${pad('ITEM', w.item)} ${pad('BAZAR NAME', w.bazar)} STATUS`);
+  console.log(`  ${'-'.repeat(w.cat)} ${'-'.repeat(w.item)} ${'-'.repeat(w.bazar)} ${'-'.repeat(w.status)}`);
 
   for (const r of rows) {
     const icon = r.status === 'in-sync' ? '=' : r.status === 'changed' ? '*' : '!';
-    console.log(`  ${pad(r.category, w.cat)} ${pad(r.item, w.item)} ${pad(r.library, w.lib)} ${icon} ${r.status}`);
+    console.log(`  ${pad(r.category, w.cat)} ${pad(r.item, w.item)} ${pad(r.bazar, w.bazar)} ${icon} ${r.status}`);
   }
 
   const changed = rows.filter(r => r.status !== 'in-sync').length;
@@ -961,11 +932,11 @@ function printTable(rows) {
 
 // ── LIST ─────────────────────────────────────────────────────────────────────
 
-function listLibrary(map) {
-  console.log('\n  === Library Contents ===\n');
+function listBazar(map) {
+  console.log('\n  === Bazar Contents ===\n');
 
   for (const cat of CATEGORIES) {
-    const catDir = join(LIB, cat);
+    const catDir = join(BAZAR, cat);
     if (!existsSync(catDir)) continue;
 
     const entries = readdirSync(catDir, { withFileTypes: true });
@@ -992,7 +963,7 @@ function listLibrary(map) {
   }
 
   // claude-mds
-  const cmDir = join(LIB, 'claude-mds');
+  const cmDir = join(BAZAR, 'claude-mds');
   if (existsSync(cmDir)) {
     const files = readdirSync(cmDir).filter(f => f.endsWith('.md')).map(f => f.replace('.md', ''));
     if (files.length) {
@@ -1006,7 +977,7 @@ function listLibrary(map) {
   }
 
   // settings
-  const sDir = join(LIB, 'settings');
+  const sDir = join(BAZAR, 'settings');
   if (existsSync(sDir)) {
     const files = readdirSync(sDir).filter(f => f.endsWith('.json')).map(f => f.replace('.json', ''));
     if (files.length) {
@@ -1020,7 +991,7 @@ function listLibrary(map) {
   }
 
   // mcp-configs
-  const mcpDir = join(LIB, 'mcp-configs');
+  const mcpDir = join(BAZAR, 'mcp-configs');
   if (existsSync(mcpDir)) {
     const files = readdirSync(mcpDir).filter(f => f.endsWith('.json')).map(f => f.replace('.json', ''));
     if (files.length) {
@@ -1034,7 +1005,7 @@ function listLibrary(map) {
   }
 
   // files
-  const fDir = join(LIB, 'files');
+  const fDir = join(BAZAR, 'files');
   if (existsSync(fDir)) {
     const items = readdirSync(fDir, { withFileTypes: true }).filter(e => e.isFile()).map(e => e.name);
     if (items.length) {
@@ -1103,9 +1074,9 @@ function addItem(projectRoot, category, itemName, map, deployPath) {
 
   // Handle files category separately
   if (category === 'files') {
-    if (!deployPath) { console.error('  Files need a deploy path: --add files <lib-name> <deploy-path>'); process.exit(1); }
-    const src = join(LIB, 'files', itemName);
-    if (!existsSync(src)) { console.error(`  Not in library: files/${itemName}`); process.exit(1); }
+    if (!deployPath) { console.error('  Files need a deploy path: --add files <bazar-name> <deploy-path>'); process.exit(1); }
+    const src = join(BAZAR, 'files', itemName);
+    if (!existsSync(src)) { console.error(`  Not in bazar: files/${itemName}`); process.exit(1); }
     if (!entry.config.files) entry.config.files = {};
     if (itemName in entry.config.files) { console.log(`  Already mapped: files/${itemName}`); return; }
     entry.config.files[itemName] = deployPath;
@@ -1120,8 +1091,8 @@ function addItem(projectRoot, category, itemName, map, deployPath) {
     process.exit(1);
   }
 
-  const src = libItemPath(category, parseItemName(itemName).full);
-  if (!existsSync(src)) { console.error(`  Not in library: ${category}/${itemName}`); process.exit(1); }
+  const src = bazarItemPath(category, parseItemName(itemName).full);
+  if (!existsSync(src)) { console.error(`  Not in bazar: ${category}/${itemName}`); process.exit(1); }
 
   if (entry.config[category].includes(itemName)) { console.log(`  Already mapped: ${category}/${itemName}`); return; }
 
@@ -1201,35 +1172,35 @@ function initProject(projectRoot, fromPath, profileName, map) {
   console.log(`  Added ${normRoot} to map.json`);
 
   // First sync right away: it writes the manifest the hooks need. Runs
-  // before ensureLibraryHooks so a profile settings.json can't drop them.
+  // before ensureBazarHooks so a profile settings.json can't drop them.
   syncProject(projectRoot, map);
-  ensureLibraryHooks(projectRoot);
+  ensureBazarHooks(projectRoot);
 }
 
-const LIBRARY_HOOKS = [
-  { event: 'Stop', script: 'library-sync.mjs', timeout: 30 },
-  { event: 'SessionStart', matcher: 'startup|resume', script: 'library-session-start.mjs', timeout: 60 },
+const BAZAR_HOOKS = [
+  { event: 'Stop', script: 'bazar-sync.mjs', timeout: 30 },
+  { event: 'SessionStart', matcher: 'startup|resume', script: 'bazar-session-start.mjs', timeout: 60 },
 ];
 
-// One-shot at init: register the LibraryHook entries in the project's own
+// One-shot at init: register the BazarHook entries in the project's own
 // settings.json (created if missing). Not recorded in the manifest, so later
 // syncs never touch the rest of the file.
-function ensureLibraryHooks(projectRoot) {
+function ensureBazarHooks(projectRoot) {
   const setPath = join(projectRoot, '.claude', 'settings.json');
   let settings = {};
   if (existsSync(setPath)) {
     try { settings = readJSON(setPath); }
-    catch (e) { console.warn(`  SKIP LibraryHook entries: settings.json unreadable (${e.message})`); return; }
+    catch (e) { console.warn(`  SKIP BazarHook entries: settings.json unreadable (${e.message})`); return; }
   }
   settings.hooks ??= {};
   let added = 0;
-  for (const { event, matcher, script, timeout } of LIBRARY_HOOKS) {
+  for (const { event, matcher, script, timeout } of BAZAR_HOOKS) {
     settings.hooks[event] ??= [];
     const present = settings.hooks[event].some(g => (g.hooks || []).some(h => h.command?.includes(script)));
     if (present) { console.log(`  ${event} hook already in settings.json`); continue; }
-    const command = `node "$CLAUDE_PROJECT_DIR/.claude/hooks/LibraryHook/${script}"`;
+    const command = `node "$CLAUDE_PROJECT_DIR/.claude/hooks/BazarHook/${script}"`;
     settings.hooks[event].push({ ...(matcher && { matcher }), hooks: [{ type: 'command', command, timeout }] });
-    console.log(`  Added LibraryHook ${event} entry to settings.json`);
+    console.log(`  Added BazarHook ${event} entry to settings.json`);
     added++;
   }
   if (!added) return;
@@ -1237,7 +1208,7 @@ function ensureLibraryHooks(projectRoot) {
   writeJSON(setPath, settings);
 }
 
-// ── SEED (project -> library, initial population) ────────────────────────────
+// ── SEED (project -> bazar, initial population) ────────────────────────────
 
 function seedProject(projectRoot, name, map) {
   const normRoot = norm(resolve(projectRoot));
@@ -1253,7 +1224,7 @@ function seedProject(projectRoot, name, map) {
   if (existsSync(skillsDir)) {
     for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
-      copyDir(join(skillsDir, entry.name), join(LIB, 'skills', entry.name));
+      copyDir(join(skillsDir, entry.name), join(BAZAR, 'skills', entry.name));
       config.skills.push(entry.name);
       imported++;
     }
@@ -1264,7 +1235,7 @@ function seedProject(projectRoot, name, map) {
   if (existsSync(agentsDir)) {
     for (const entry of readdirSync(agentsDir, { withFileTypes: true })) {
       if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
-      copyFile(join(agentsDir, entry.name), join(LIB, 'agents', entry.name));
+      copyFile(join(agentsDir, entry.name), join(BAZAR, 'agents', entry.name));
       config.agents.push(entry.name.replace('.md', ''));
       imported++;
     }
@@ -1275,7 +1246,7 @@ function seedProject(projectRoot, name, map) {
   if (existsSync(cmdsDir)) {
     for (const entry of readdirSync(cmdsDir, { withFileTypes: true })) {
       if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
-      copyFile(join(cmdsDir, entry.name), join(LIB, 'commands', entry.name));
+      copyFile(join(cmdsDir, entry.name), join(BAZAR, 'commands', entry.name));
       config.commands.push(entry.name.replace('.md', ''));
       imported++;
     }
@@ -1286,7 +1257,7 @@ function seedProject(projectRoot, name, map) {
   if (existsSync(hooksDir)) {
     for (const entry of readdirSync(hooksDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
-      copyDir(join(hooksDir, entry.name), join(LIB, 'hooks', entry.name));
+      copyDir(join(hooksDir, entry.name), join(BAZAR, 'hooks', entry.name));
       config.hooks.push(entry.name);
       imported++;
     }
@@ -1296,7 +1267,7 @@ function seedProject(projectRoot, name, map) {
   if (name) {
     const cmdPath = join(projectRoot, 'CLAUDE.md');
     if (existsSync(cmdPath)) {
-      copyFile(cmdPath, join(LIB, 'claude-mds', name + '.md'));
+      copyFile(cmdPath, join(BAZAR, 'claude-mds', name + '.md'));
       config['claude-md'] = name;
       imported++;
     }
@@ -1304,7 +1275,7 @@ function seedProject(projectRoot, name, map) {
     // settings.json
     const setPath = join(claudeDir, 'settings.json');
     if (existsSync(setPath)) {
-      copyFile(setPath, join(LIB, 'settings', name + '.json'));
+      copyFile(setPath, join(BAZAR, 'settings', name + '.json'));
       config.settings = name;
       imported++;
     }
@@ -1312,7 +1283,7 @@ function seedProject(projectRoot, name, map) {
     // .mcp.json
     const mcpPath = join(projectRoot, '.mcp.json');
     if (existsSync(mcpPath)) {
-      copyFile(mcpPath, join(LIB, 'mcp-configs', name + '.json'));
+      copyFile(mcpPath, join(BAZAR, 'mcp-configs', name + '.json'));
       config.mcp = name;
       imported++;
     }
@@ -1332,9 +1303,9 @@ function seedProject(projectRoot, name, map) {
   }
 
   const manifest = {
-    library_remote: getLibRemote(),
+    bazar_remote: getBazarRemote(),
     synced_at: new Date().toISOString(),
-    library_commit: getLibCommit(),
+    bazar_commit: getBazarCommit(),
     managed
   };
   manifest.base_hashes = computeBaseHashes(projectRoot, manifest);
@@ -1405,27 +1376,27 @@ function parseArgs() {
 
 function printUsage() {
   console.log(`
-  claude-library sync
+  bazar sync
 
   Usage: node sync.mjs [operation] [options]
 
   Operations:
-    (default)                         Sync library -> current project
-    --push                            Push changed items -> library (with confirmation)
+    (default)                         Sync bazar -> current project
+    --push                            Push changed items -> bazar (with confirmation)
     --push --category <cat>           Push all changed items in a category
     --push --category <cat> --item <name>  Push a single changed item
     --push -y                         Push all changed items without confirmation
-    --push --prune                    Push AND delete library files absent locally (destructive mirror; for intentional deletes/renames)
-    --push --category <cat> --item <name> --force  Deliberately overwrite a moved library item
+    --push --prune                    Push AND delete bazar files absent locally (destructive mirror; for intentional deletes/renames)
+    --push --category <cat> --item <name> --force  Deliberately overwrite a moved bazar item
     --diff                            Show sync status
     --list                            List projects, profiles, items, and variants
     --add <cat> <name> [deploy-path]  Add item to current project
     --remove <cat> <name>             Remove item from current project
     --init [--profile <name>]         Add project using a profile
     --init [--from <path>]            Add project copying another's config
-    --seed [--name <slug>]            Import project into library (initial setup)
-    --link                            Register this library's local path on this device (~/.claude/library-paths.json)
-    --unlink                          Remove this library's path entry from this device
+    --seed [--name <slug>]            Import project into bazar (initial setup)
+    --link                            Register this bazar's local path on this device (~/.claude/bazar-paths.json)
+    --unlink                          Remove this bazar's path entry from this device
 
   Options:
     --project <path>    Target specific project (default: cwd)
@@ -1433,7 +1404,7 @@ function printUsage() {
     --category <cat>    Filter push by category (skills, agents, commands, hooks, rules)
     --item <name>       Filter push by item name (requires --category)
     --yes, -y           Skip confirmation prompt
-    --prune, --mirror   Let push delete library files that are absent on this device
+    --prune, --mirror   Let push delete bazar files that are absent on this device
                         (default push is additive and never deletes; it warns instead)
     --force             Bypass the item hash precondition for a deliberate rollback
                         (requires --category and --item)
@@ -1463,15 +1434,15 @@ async function main() {
   const projectRoot = args.project ? resolve(args.project) : process.cwd();
   let pushPullFailed = false;
 
-  console.log(`\n  claude-library sync`);
-  console.log(`  library: ${norm(LIB)}`);
+  console.log(`\n  bazar sync`);
+  console.log(`  bazar: ${norm(BAZAR)}`);
 
-  // Pull latest before operations that read from library
+  // Pull latest before operations that read from bazar
   if (['sync', 'diff', 'push'].includes(args.command)) {
     process.stdout.write('  pulling latest... ');
     const pulled = gitPull();
     pulled ? console.log('done') : console.log('skipped');
-    pushPullFailed = args.command === 'push' && Boolean(getLibRemote()) && !pulled;
+    pushPullFailed = args.command === 'push' && Boolean(getBazarRemote()) && !pulled;
   }
 
   const map = readMap();
@@ -1481,9 +1452,9 @@ async function main() {
   // auto-registered without thinking about it. Idempotent — writePathRegistry
   // is a no-op if the value is unchanged.
   {
-    const remote = getLibRemote();
+    const remote = getBazarRemote();
     if (remote) {
-      try { writePathRegistry(remote, norm(LIB)); } catch {}
+      try { writePathRegistry(remote, norm(BAZAR)); } catch {}
     }
   }
 
@@ -1500,7 +1471,7 @@ async function main() {
       break;
     case 'push':
       if (pushPullFailed) {
-        console.error('  REFUSED: git pull --ff-only failed; library freshness is unknown.');
+        console.error('  REFUSED: git pull --ff-only failed; bazar freshness is unknown.');
         process.exitCode = 1;
         break;
       }
@@ -1510,7 +1481,7 @@ async function main() {
       diffProject(projectRoot);
       break;
     case 'list':
-      listLibrary(map);
+      listBazar(map);
       break;
     case 'add':
       addItem(projectRoot, args.category, args.item, map, args.deployPath);
@@ -1525,15 +1496,15 @@ async function main() {
       seedProject(projectRoot, args.name, map);
       break;
     case 'link': {
-      const remote = getLibRemote();
-      if (!remote) { console.error('  No git remote in library directory.'); process.exit(1); }
-      const wrote = writePathRegistry(remote, norm(LIB));
-      console.log(wrote ? `  Linked ${remote} -> ${norm(LIB)} for this device` : `  Already linked: ${remote} -> ${norm(LIB)}`);
+      const remote = getBazarRemote();
+      if (!remote) { console.error('  No git remote in bazar directory.'); process.exit(1); }
+      const wrote = writePathRegistry(remote, norm(BAZAR));
+      console.log(wrote ? `  Linked ${remote} -> ${norm(BAZAR)} for this device` : `  Already linked: ${remote} -> ${norm(BAZAR)}`);
       break;
     }
     case 'unlink': {
-      const remote = getLibRemote();
-      if (!remote) { console.error('  No git remote in library directory.'); process.exit(1); }
+      const remote = getBazarRemote();
+      if (!remote) { console.error('  No git remote in bazar directory.'); process.exit(1); }
       const removed = removePathRegistryEntry(remote);
       console.log(removed ? `  Unlinked ${remote} from this device` : `  No registry entry for ${remote}`);
       break;

@@ -1,17 +1,17 @@
 {
-  "$schema": "library-map-v1",
+  "$schema": "bazar-map-v1",
   "ignore": {
-    "LibraryHook": ["logs", "pending-sync.json"]
+    "BazarHook": ["logs", "pending-sync.json"]
   },
   "profiles": {
     "starter": {
-      "commands": ["library"],
-      "hooks": ["LibraryHook"],
+      "commands": ["bazar"],
+      "hooks": ["BazarHook"],
       "skills": [],
       "agents": [],
       "rules": [],
       "files": {},
-      "gitignore-lines": [".claude/hooks/LibraryHook/pending-sync.json"]
+      "gitignore-lines": [".claude/hooks/BazarHook/pending-sync.json"]
     }
   },
   "projects": {}

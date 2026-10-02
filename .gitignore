@@ -3,5 +3,5 @@ node_modules/
 logs/
 .DS_Store
 Thumbs.db
-hooks/LibraryHook/pending-sync.json
-hooks/LibraryHook/logs/
+hooks/BazarHook/pending-sync.json
+hooks/BazarHook/logs/

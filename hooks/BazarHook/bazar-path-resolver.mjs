@@ -1,30 +1,26 @@
 #!/usr/bin/env node
 
 /**
- * library-path-resolver.mjs
+ * bazar-path-resolver.mjs
  *
- * Per-device resolver for the local path of a claude-library checkout.
+ * Per-device resolver for the local path of a Bazar checkout.
  *
  * Why this exists:
- *   The legacy design baked the library's absolute path into every project's
- *   `.claude/library.json` (the `library_path` field). That field is wrong on
- *   any second device where the library lives at a different absolute path,
- *   so the auto-push hook silently fails after a clone.
+ *   An absolute path baked into every project's `.claude/bazar.json` would be
+ *   wrong on any second device where the bazar lives at a different absolute
+ *   path, so the auto-push hook would silently fail after a clone.
  *
- *   v5.3 moves the path out of the per-repo manifest and into a per-device
- *   registry at `~/.claude/library-paths.json` keyed by `library_remote`
- *   (the git URL of the library — stable across machines, distinct per
- *   library / per fork).
+ *   The path therefore lives outside the per-repo manifest, in a per-device
+ *   registry at `~/.claude/bazar-paths.json` keyed by `bazar_remote`
+ *   (the git URL of the bazar — stable across machines, distinct per
+ *   bazar / per fork).
  *
  * Resolution chain (first hit wins):
- *   1. `process.env.CLAUDE_LIBRARY_PATH`          → source: 'env'
- *   2. registry lookup by `libraryRemote`         → source: 'registry'
+ *   1. `process.env.CLAUDE_BAZAR_PATH`            → source: 'env'
+ *   2. registry lookup by `bazarRemote`           → source: 'registry'
  *   3. autodetect under common GitHub roots       → source: 'autodetect'
  *      (auto-registers on hit)
- *   4. legacy `manifest.library_path` if it       → source: 'legacy-manifest'
- *      points to an existing directory
- *      (auto-registers on hit)
- *   5. fail                                       → source: 'none'
+ *   4. fail                                       → source: 'none'
  *
  * Pure Node.js. Zero external dependencies. Match `sync.mjs` style:
  * ES modules, single file, `node:` imports only.
@@ -37,7 +33,7 @@ import { execSync } from 'node:child_process';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const REGISTRY_SCHEMA = 'library-paths-v1';
+const REGISTRY_SCHEMA = 'bazar-paths-v1';
 const AUTODETECT_ROOTS = ['GitHub', 'Github', 'github', 'code', 'projects', 'src'];
 const IS_WINDOWS = platform() === 'win32';
 
@@ -72,7 +68,7 @@ function remotesMatch(a, b) {
 // ── Registry I/O ─────────────────────────────────────────────────────────────
 
 export function getRegistryPath() {
-  return join(homedir(), '.claude', 'library-paths.json');
+  return join(homedir(), '.claude', 'bazar-paths.json');
 }
 
 /**
@@ -96,12 +92,12 @@ export function readPathRegistry() {
 function buildRegistryShape(existing) {
   const data = existing && typeof existing === 'object' ? existing : {};
   if (data.$schema !== REGISTRY_SCHEMA) data.$schema = REGISTRY_SCHEMA;
-  if (!data.libraries || typeof data.libraries !== 'object') data.libraries = {};
+  if (!data.paths || typeof data.paths !== 'object') data.paths = {};
   return data;
 }
 
 /**
- * Write a `(libraryRemote → localPath)` mapping into the registry.
+ * Write a `(bazarRemote → localPath)` mapping into the registry.
  * Idempotent: only writes to disk if the value differs from what's there.
  *
  * Path is stored normalized (forward slashes) so cross-platform consumers
@@ -110,20 +106,20 @@ function buildRegistryShape(existing) {
  * Returns `true` if a write occurred, `false` if the entry was already
  * up-to-date.
  */
-export function writePathRegistry(libraryRemote, localPath) {
-  if (!libraryRemote || typeof libraryRemote !== 'string') return false;
+export function writePathRegistry(bazarRemote, localPath) {
+  if (!bazarRemote || typeof bazarRemote !== 'string') return false;
   if (!localPath || typeof localPath !== 'string') return false;
 
-  const key = libraryRemote.trim();
+  const key = bazarRemote.trim();
   const value = norm(localPath);
   if (!key || !value) return false;
 
   const existing = readPathRegistry();
   const data = buildRegistryShape(existing);
 
-  if (data.libraries[key] === value) return false;
+  if (data.paths[key] === value) return false;
 
-  data.libraries[key] = value;
+  data.paths[key] = value;
 
   const filepath = getRegistryPath();
   mkdirSync(join(homedir(), '.claude'), { recursive: true });
@@ -135,18 +131,18 @@ export function writePathRegistry(libraryRemote, localPath) {
  * Remove an entry from the registry. Returns `true` if an entry was
  * removed, `false` if there was nothing to remove.
  */
-export function removePathRegistryEntry(libraryRemote) {
-  if (!libraryRemote || typeof libraryRemote !== 'string') return false;
-  const key = libraryRemote.trim();
+export function removePathRegistryEntry(bazarRemote) {
+  if (!bazarRemote || typeof bazarRemote !== 'string') return false;
+  const key = bazarRemote.trim();
   if (!key) return false;
 
   const filepath = getRegistryPath();
   if (!existsSync(filepath)) return false;
 
   const data = buildRegistryShape(readPathRegistry());
-  if (!(key in data.libraries)) return false;
+  if (!(key in data.paths)) return false;
 
-  delete data.libraries[key];
+  delete data.paths[key];
   writeFileSync(filepath, JSON.stringify(data, null, 2) + '\n');
   return true;
 }
@@ -156,20 +152,20 @@ export function removePathRegistryEntry(libraryRemote) {
  * case differences — entries written under any spelling resolve as long
  * as `normalizeRemote` returns the same thing.
  */
-function lookupRegistry(libraryRemote) {
+function lookupRegistry(bazarRemote) {
   const data = readPathRegistry();
-  const libraries = (data && data.libraries) || {};
+  const paths = (data && data.paths) || {};
 
   // Fast path: exact-string match (common case).
-  if (typeof libraries[libraryRemote] === 'string') {
-    return libraries[libraryRemote];
+  if (typeof paths[bazarRemote] === 'string') {
+    return paths[bazarRemote];
   }
 
   // Slow path: normalize-and-compare every key. Handles `.git` suffix
   // mismatches and case differences.
-  const target = normalizeRemote(libraryRemote);
+  const target = normalizeRemote(bazarRemote);
   if (!target) return null;
-  for (const [key, value] of Object.entries(libraries)) {
+  for (const [key, value] of Object.entries(paths)) {
     if (typeof value !== 'string') continue;
     if (normalizeRemote(key) === target) return value;
   }
@@ -209,12 +205,12 @@ function getRemoteForDir(dir) {
 
 /**
  * Walk common roots under the user's home (`~/GitHub`, `~/code`, etc.)
- * and look for a checkout whose `origin` remote matches `libraryRemote`.
+ * and look for a checkout whose `origin` remote matches `bazarRemote`.
  *
  * On a hit, we register the result so future calls take the fast path.
  */
-function autodetect(libraryRemote) {
-  if (!libraryRemote) return null;
+function autodetect(bazarRemote) {
+  if (!bazarRemote) return null;
 
   for (const rootName of AUTODETECT_ROOTS) {
     const root = join(homedir(), rootName);
@@ -224,10 +220,10 @@ function autodetect(libraryRemote) {
     for (const dir of subdirs) {
       const remote = getRemoteForDir(dir);
       if (!remote) continue;
-      if (remotesMatch(remote, libraryRemote)) {
+      if (remotesMatch(remote, bazarRemote)) {
         const normalized = norm(dir);
         // Self-register so we don't pay this cost again.
-        try { writePathRegistry(libraryRemote, normalized); }
+        try { writePathRegistry(bazarRemote, normalized); }
         catch { /* registry write failures are non-fatal */ }
         return normalized;
       }
@@ -237,88 +233,54 @@ function autodetect(libraryRemote) {
   return null;
 }
 
-// ── Legacy manifest fallback ─────────────────────────────────────────────────
-
-function tryLegacyManifest(manifestPath, libraryRemote) {
-  if (!manifestPath) return null;
-  if (!existsSync(manifestPath)) return null;
-  try {
-    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-    const legacyPath = manifest && manifest.library_path;
-    if (typeof legacyPath !== 'string' || !legacyPath) return null;
-    if (!existsSync(legacyPath)) return null;
-
-    const normalized = norm(legacyPath);
-    // Auto-register so the next sync run can drop the legacy field cleanly.
-    if (libraryRemote) {
-      try { writePathRegistry(libraryRemote, normalized); }
-      catch { /* non-fatal */ }
-    }
-    return normalized;
-  } catch {
-    return null;
-  }
-}
-
 // ── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * Resolve the local path of the library identified by `libraryRemote`.
+ * Resolve the local path of the bazar identified by `bazarRemote`.
  *
  * @param {object} opts
- * @param {string} opts.libraryRemote - Git remote URL of the library
- *     (the `library_remote` field from the project's `.claude/library.json`).
+ * @param {string} opts.bazarRemote - Git remote URL of the bazar
+ *     (the `bazar_remote` field from the project's `.claude/bazar.json`).
  *     Required for registry lookup and autodetect; if omitted, only the env
- *     and legacy-manifest sources can succeed.
- * @param {string} [opts.manifestPath] - Absolute path to the project's
- *     `.claude/library.json`. Used only for the legacy fallback step.
- * @param {string} [opts.projectDir] - Reserved for future use (e.g.
- *     resolving `manifestPath` from a project root). Currently unused but
- *     accepted for forward compatibility.
+ *     source can succeed.
  *
- * @returns {Promise<{ path: string|null, source: 'env'|'registry'|'autodetect'|'legacy-manifest'|'none' }>}
+ * @returns {Promise<{ path: string|null, source: 'env'|'registry'|'autodetect'|'none' }>}
  */
-export async function resolveLibraryPath({ libraryRemote, manifestPath, projectDir } = {}) {
+export async function resolveBazarPath({ bazarRemote } = {}) {
   // 1. Env override — highest priority for ad-hoc / CI / debugging.
-  const envPath = process.env.CLAUDE_LIBRARY_PATH;
+  const envPath = process.env.CLAUDE_BAZAR_PATH;
   if (envPath && existsSync(envPath)) {
     return { path: norm(envPath), source: 'env' };
   }
 
   // 2. Registry lookup keyed by remote.
-  if (libraryRemote) {
-    const registered = lookupRegistry(libraryRemote);
+  if (bazarRemote) {
+    const registered = lookupRegistry(bazarRemote);
     if (registered && existsSync(registered)) {
       return { path: norm(registered), source: 'registry' };
     }
   }
 
   // 3. Autodetect across common GitHub roots.
-  if (libraryRemote) {
-    const detected = autodetect(libraryRemote);
+  if (bazarRemote) {
+    const detected = autodetect(bazarRemote);
     if (detected && existsSync(detected)) {
       return { path: norm(detected), source: 'autodetect' };
     }
   }
 
-  // 4. Legacy manifest fallback (one-shot graceful migration).
-  const legacy = tryLegacyManifest(manifestPath, libraryRemote);
-  if (legacy) {
-    return { path: legacy, source: 'legacy-manifest' };
-  }
-
-  // 5. Nothing worked.
+  // 4. Nothing worked.
   return { path: null, source: 'none' };
 }
 
 /**
  * Format a user-facing error message for the case where resolution failed.
  * The hook's logging path surfaces this so a user on a fresh device sees a
- * concrete next step instead of "Library path not found".
+ * concrete next step instead of "Bazar path not found".
  */
-export function formatResolutionError(libraryRemote) {
-  const remote = libraryRemote || '<unknown>';
-  return 'Library path not registered on this device. Run `node sync.mjs --link` from your library directory (' + remote + ') to register it.';
+export function formatResolutionError(bazarRemote) {
+  const remote = bazarRemote || '<unknown>';
+  return 'Bazar path not registered on this device. Run `node sync.mjs --link` from your bazar directory (' + remote + ') to register it.';
 }
 
 // `IS_WINDOWS` is kept available for future platform-specific behavior

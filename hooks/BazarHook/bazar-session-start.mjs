@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * LibraryHook - SessionStart driver
+ * BazarHook - SessionStart driver
  *
  * At session start: first pushes any local edits still pending (e.g. a
- * previous auto-push that failed), then syncs library -> project.
+ * previous auto-push that failed), then syncs bazar -> project.
  *
  * Safety: if the push is refused, fails, or reports CONFLICT / NO BASE,
  * the sync is SKIPPED, so local edits are never overwritten.
@@ -19,9 +19,9 @@ import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { spawnSync } from "child_process";
 import {
-  resolveLibraryPath,
+  resolveBazarPath,
   formatResolutionError,
-} from "./library-path-resolver.mjs";
+} from "./bazar-path-resolver.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectDir = resolve(__dirname, "..", "..", "..");
@@ -33,7 +33,7 @@ function log(message) {
   try {
     const logDir = join(__dirname, "logs");
     mkdirSync(logDir, { recursive: true });
-    const logFile = join(logDir, "library-sync.log");
+    const logFile = join(logDir, "bazar-sync.log");
     const prev = existsSync(logFile) ? readFileSync(logFile, "utf-8") : "";
     const line = `[${new Date().toISOString()}] [session-start] ${message}\n`;
     writeFileSync(logFile, prev + line);
@@ -63,7 +63,7 @@ function emit(message, reloadSkills) {
   const out = {
     hookSpecificOutput: {
       hookEventName: "SessionStart",
-      additionalContext: `[claude-library] ${message}`,
+      additionalContext: `[bazar] ${message}`,
     },
   };
   if (reloadSkills) out.hookSpecificOutput.reloadSkills = true;
@@ -87,10 +87,7 @@ async function main() {
     /* no stdin is fine */
   }
 
-  let manifestPath = join(projectDir, ".claude", "library.json");
-  if (!existsSync(manifestPath)) {
-    manifestPath = join(projectDir, ".claude", ".library-manifest.json");
-  }
+  let manifestPath = join(projectDir, ".claude", "bazar.json");
   if (!existsSync(manifestPath)) return;
 
   let manifest;
@@ -101,28 +98,26 @@ async function main() {
     return;
   }
 
-  let libraryPath = null;
+  let bazarPath = null;
   try {
-    const resolved = await resolveLibraryPath({
-      libraryRemote: manifest.library_remote,
-      manifestPath,
-      projectDir,
+    const resolved = await resolveBazarPath({
+      bazarRemote: manifest.bazar_remote,
     });
-    libraryPath = resolved && resolved.path;
+    bazarPath = resolved && resolved.path;
   } catch (e) {
     log("Path resolution threw: " + e.message);
   }
-  if (!libraryPath) {
-    const msg = formatResolutionError(manifest.library_remote);
+  if (!bazarPath) {
+    const msg = formatResolutionError(manifest.bazar_remote);
     log(msg);
     emit("Sync all'avvio saltato: " + msg, false);
     return;
   }
 
-  const syncScript = join(libraryPath, "sync.mjs");
+  const syncScript = join(bazarPath, "sync.mjs");
   if (!existsSync(syncScript)) {
     log("sync.mjs not found at: " + syncScript);
-    emit("Sync all'avvio saltato: sync.mjs non trovato in " + libraryPath, false);
+    emit("Sync all'avvio saltato: sync.mjs non trovato in " + bazarPath, false);
     return;
   }
 
@@ -136,13 +131,13 @@ async function main() {
     writeState(readLastSyncAt(), "session-start: " + detail);
     emit(
       "Sync all'avvio SALTATO per non sovrascrivere modifiche locali. " +
-        "Dettaglio: " + detail + ". Suggerisci all'utente di eseguire /library diff.",
+        "Dettaglio: " + detail + ". Suggerisci all'utente di eseguire /bazar diff.",
       false
     );
     return;
   }
 
-  // 2. Sync library -> project.
+  // 2. Sync bazar -> project.
   const sync = run(syncScript, []);
   if (!sync.ok) {
     const detail = sync.out.trim().split("\n").slice(-3).join(" | ");
@@ -158,7 +153,7 @@ async function main() {
   const pushedLine = /Pushed (\d+) item/.exec(push.out);
   const syncedLine = /Synced (\d+) items/.exec(sync.out);
   const msg =
-    "Progetto allineato alla library" +
+    "Progetto allineato al bazar" +
     (pushedLine ? `, ${pushedLine[1]} modifiche locali inviate prima del sync` : "") +
     (syncedLine ? ` (${syncedLine[1]} elementi sincronizzati).` : ".");
   log(msg);

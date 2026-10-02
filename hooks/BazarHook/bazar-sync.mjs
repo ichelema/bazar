@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * LibraryHook - Stop-hook driver for auto-sync
+ * BazarHook - Stop-hook driver for auto-sync
  *
  * Fires once at the end of every Claude turn (Stop event). Runs a cheap
- * mtime walk over library-managed paths in the project. If any managed
+ * mtime walk over bazar-managed paths in the project. If any managed
  * file is newer than `lastSyncAt`, runs `sync.mjs --push --yes`
  * synchronously. No detached spawning. No platform-specific code.
  *
@@ -22,9 +22,9 @@ import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { execFileSync } from "child_process";
 import {
-  resolveLibraryPath,
+  resolveBazarPath,
   formatResolutionError,
-} from "./library-path-resolver.mjs";
+} from "./bazar-path-resolver.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -53,7 +53,7 @@ function log(message) {
   try {
     const logDir = join(__dirname, "logs");
     mkdirSync(logDir, { recursive: true });
-    const logFile = join(logDir, "library-sync.log");
+    const logFile = join(logDir, "bazar-sync.log");
     const timestamp = new Date().toISOString();
     const line = `[${timestamp}] ${message}\n`;
     const existing = existsSync(logFile) ? readFileSync(logFile, "utf-8") : "";
@@ -215,11 +215,8 @@ async function main() {
     /* no stdin is fine */
   }
 
-  // Read manifest (prefer new name, fall back to legacy).
-  let manifestPath = join(projectDir, ".claude", "library.json");
-  if (!existsSync(manifestPath)) {
-    manifestPath = join(projectDir, ".claude", ".library-manifest.json");
-  }
+  // Read manifest.
+  let manifestPath = join(projectDir, ".claude", "bazar.json");
   if (!existsSync(manifestPath)) return;
 
   let manifest;
@@ -281,14 +278,12 @@ async function main() {
     return;
   }
 
-  // Resolve the library path. If we cannot, log and persist the error,
+  // Resolve the bazar path. If we cannot, log and persist the error,
   // but do NOT advance lastSyncAt -- the next turn will retry.
   let resolved;
   try {
-    resolved = await resolveLibraryPath({
-      libraryRemote: manifest.library_remote,
-      manifestPath,
-      projectDir,
+    resolved = await resolveBazarPath({
+      bazarRemote: manifest.bazar_remote,
     });
   } catch (e) {
     log("Path resolution threw: " + e.message);
@@ -296,15 +291,15 @@ async function main() {
     return;
   }
 
-  const libraryPath = resolved && resolved.path;
-  if (!libraryPath) {
-    const message = formatResolutionError(manifest.library_remote);
+  const bazarPath = resolved && resolved.path;
+  if (!bazarPath) {
+    const message = formatResolutionError(manifest.bazar_remote);
     log(message);
     writeState(stateFile, { lastSyncAt, lastError: message });
     return;
   }
 
-  const syncScript = join(libraryPath, "sync.mjs");
+  const syncScript = join(bazarPath, "sync.mjs");
   if (!existsSync(syncScript)) {
     const msg = "sync.mjs not found at: " + syncScript;
     log(msg);
@@ -314,7 +309,7 @@ async function main() {
 
   // Run the push synchronously. This is the only "expensive" branch and
   // only fires when there's actual work to do.
-  log("Auto-pushing changes to library");
+  log("Auto-pushing changes to bazar");
   try {
     const result = execFileSync(
       process.execPath,
