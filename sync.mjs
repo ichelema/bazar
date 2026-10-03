@@ -193,12 +193,33 @@ function getBazarRemote() {
 function readMap() { return readJSON(join(BAZAR, 'map.json')); }
 function writeMap(map) { writeJSON(join(BAZAR, 'map.json'), map); }
 
+// Projects are keyed in map.json by a device-independent name (the folder
+// name by default). The project's manifest records that key, so the same
+// repo is recognized on every machine regardless of where it is cloned.
+// `config.paths` only lists where the project has been seen, for --all.
+function projectKey(projectRoot) {
+  return basename(resolve(projectRoot));
+}
+
 function findProject(map, targetPath) {
-  const normTarget = norm(resolve(targetPath));
-  for (const [path, config] of Object.entries(map.projects)) {
-    if (norm(resolve(path)) === normTarget) return { path, config };
+  let key = null;
+  const mPath = manifestPath(targetPath);
+  if (existsSync(mPath)) {
+    try { key = readJSON(mPath).project || null; } catch {}
   }
-  return null;
+  if (!key || !(key in map.projects)) key = projectKey(targetPath);
+  const config = map.projects[key];
+  return config ? { key, config } : null;
+}
+
+// Remember the local path of a project (per device, informational). Returns
+// true when map.json changed.
+function rememberProjectPath(entry, projectRoot) {
+  const here = norm(resolve(projectRoot));
+  entry.config.paths ??= [];
+  if (entry.config.paths.includes(here)) return false;
+  entry.config.paths.push(here);
+  return true;
 }
 
 function emptyConfig() {
@@ -217,6 +238,7 @@ function syncProject(projectRoot, map) {
   const { config } = entry;
   const claudeDir = join(projectRoot, '.claude');
   ensureDir(claudeDir);
+  if (rememberProjectPath(entry, projectRoot)) writeMap(map);
 
   // Read old manifest for cleanup
   let oldManifest = null;
@@ -353,6 +375,7 @@ function syncProject(projectRoot, map) {
   // resolved at runtime via `~/.claude/bazar-paths.json` (keyed by
   // `bazar_remote`) so the manifest stays portable across machines.
   const manifest = {
+    project: entry.key,
     bazar_remote: getBazarRemote(),
     synced_at: new Date().toISOString(),
     bazar_commit: getBazarCommit(),
@@ -1048,11 +1071,12 @@ function listBazar(map) {
 
   // projects
   console.log('  === Projects ===\n');
-  for (const [path, config] of Object.entries(map.projects)) {
+  for (const [key, config] of Object.entries(map.projects)) {
     const total = CATEGORIES.reduce((n, c) => n + (config[c] || []).length, 0)
       + (config['claude-md'] ? 1 : 0) + (config.settings ? 1 : 0) + (config.mcp ? 1 : 0)
       + Object.keys(config.files || {}).length;
-    console.log(`  ${norm(path)} (${total} items)`);
+    console.log(`  ${key} (${total} items)`);
+    if (config.paths?.length) console.log(`    paths: ${config.paths.join(', ')}`);
     for (const cat of CATEGORIES) {
       const items = config[cat] || [];
       if (items.length) console.log(`    ${cat}: ${items.join(', ')}`);
@@ -1144,7 +1168,8 @@ function removeItemFromProject(projectRoot, category, itemName, map) {
 
 function initProject(projectRoot, fromPath, profileName, map) {
   const normRoot = norm(resolve(projectRoot));
-  if (findProject(map, projectRoot)) { console.error(`  Already in map.json: ${normRoot}`); process.exit(1); }
+  const key = projectKey(projectRoot);
+  if (findProject(map, projectRoot)) { console.error(`  Already in map.json: ${key}`); process.exit(1); }
 
   let config;
   if (profileName) {
@@ -1166,10 +1191,11 @@ function initProject(projectRoot, fromPath, profileName, map) {
 
   // Ensure files field exists
   if (!config.files) config.files = {};
+  config.paths = [normRoot];
 
-  map.projects[normRoot] = config;
+  map.projects[key] = config;
   writeMap(map);
-  console.log(`  Added ${normRoot} to map.json`);
+  console.log(`  Added ${key} (${normRoot}) to map.json`);
 
   // First sync right away: it writes the manifest the hooks need. Runs
   // before ensureBazarHooks so a profile settings.json can't drop them.
@@ -1290,7 +1316,9 @@ function seedProject(projectRoot, name, map) {
   }
 
   // Update map
-  map.projects[normRoot] = config;
+  const key = projectKey(projectRoot);
+  config.paths = [normRoot];
+  map.projects[key] = config;
   writeMap(map);
 
   // Write manifest
@@ -1303,6 +1331,7 @@ function seedProject(projectRoot, name, map) {
   }
 
   const manifest = {
+    project: key,
     bazar_remote: getBazarRemote(),
     synced_at: new Date().toISOString(),
     bazar_commit: getBazarCommit(),
@@ -1462,9 +1491,13 @@ async function main() {
   switch (args.command) {
     case 'sync':
       if (args.all) {
-        for (const path of Object.keys(map.projects)) {
-          console.log(`\n  -> ${norm(path)}`);
-          syncProject(resolve(path), map);
+        for (const [key, config] of Object.entries(map.projects)) {
+          const paths = (config.paths || []).filter(p => existsSync(p));
+          if (!paths.length) { console.log(`\n  -> ${key}: not present on this device, skipped`); continue; }
+          for (const path of paths) {
+            console.log(`\n  -> ${key} (${norm(path)})`);
+            syncProject(resolve(path), map);
+          }
         }
       } else {
         syncProject(projectRoot, map);

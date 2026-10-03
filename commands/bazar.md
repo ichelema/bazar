@@ -21,6 +21,8 @@ You are the single interface between the user and their Bazar system. The user s
 
 A central git repo (the bazar) holds all reusable `.claude/` content: skills, agents, commands, hooks, rules, CLAUDE.md files, settings, MCP configs, and arbitrary files. Each project is mapped in `map.json` to receive a specific selection of items. A manifest file in each project tracks what the bazar owns.
 
+Projects are keyed in `map.json` by a device-independent name (the folder name by default), and the manifest records that key in its `project` field. The same repo is therefore recognized on every machine, wherever it is cloned. Each project's `paths` array just lists where it has been seen; `--all` uses the ones that exist on the current device.
+
 **Key concepts:**
 
 - **Sync** (bazar to project): copies bazar items into the project's `.claude/` folder. Bazar wins.
@@ -50,7 +52,7 @@ Additionally, `master-skill-rules.json` is filtered per-project during sync to p
 
 Before executing any operation:
 
-1. Read `.claude/bazar.json` for: bazar remote (`bazar_remote`), managed items, last sync time, bazar commit (`bazar_commit`)
+1. Read `.claude/bazar.json` for: project key (`project`), bazar remote (`bazar_remote`), managed items, last sync time, bazar commit (`bazar_commit`)
 2. Resolve where the bazar repo lives on this device: `~/.claude/bazar-paths.json` maps `bazar_remote` to a local path (the `CLAUDE_BAZAR_PATH` environment variable overrides it). Store this as `{bazar_path}`
 3. If the manifest is missing AND no bazar repo exists locally, the user may need initial setup. Check for the "First-Time Setup" triggers below.
 4. If the manifest is missing but a bazar repo exists, suggest `/bazar seed` or `/bazar set me up`
@@ -242,7 +244,7 @@ Output key: `= in-sync`, `* changed`, `! missing`.
 
 **Triggers:** "what's different across projects", "compare all projects", "which projects are stale"
 
-Read `map.json` to get all project paths, then run diff on each:
+Read `map.json`, take each project's `paths` that exist on this device, then run diff on each:
 
 ```bash
 node {bazar_path}/sync.mjs --diff --project "{path1}"
@@ -304,7 +306,7 @@ If the item doesn't exist in the bazar, ask: "That item doesn't exist in the baz
 1. Read `map.json` to find target projects
 2. If "all": iterate every project
 3. If "all dev projects": iterate projects using the `dev` profile (match by comparing their config against the profile)
-4. For each target project:
+4. For each target project, using a path from its `paths` that exists on this device:
 
 ```bash
 node {bazar_path}/sync.mjs --add {category} {item} --project "{path}"
