@@ -11,7 +11,7 @@ import {
   cpSync, rmSync, readdirSync, statSync, unlinkSync
 } from 'node:fs';
 import { join, basename, dirname, resolve, relative } from 'node:path';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
@@ -147,25 +147,76 @@ function manifestPath(projectRoot) {
 
 // ── Git Operations ───────────────────────────────────────────────────────────
 
+function git(args, opts = {}) {
+  return execFileSync('git', args, { cwd: BAZAR, encoding: 'utf8', stdio: 'pipe', ...opts });
+}
+
+// Bring the bazar up to date. Fast-forward first; if this device has local
+// commits (e.g. a push that failed while offline) fall back to a rebase, and
+// abort it cleanly on conflict. Then publish any commits still unpushed.
 function gitPull() {
+  try { git(['pull', '--ff-only', '--no-rebase']); }
+  catch {
+    try { git(['pull', '--rebase', '--no-autostash']); }
+    catch {
+      try { git(['rebase', '--abort']); } catch {}
+      return false;
+    }
+  }
   try {
-    execSync('git pull --ff-only', { cwd: BAZAR, stdio: 'pipe' });
-    return true;
-  } catch { return false; }
+    // "# branch.ab +<ahead> -<behind>" (avoids the @{u} syntax, which some
+    // Windows git builds mangle through brace expansion).
+    const ab = /^# branch\.ab \+(\d+)/m.exec(git(['status', '--porcelain=v2', '--branch']));
+    if (ab && ab[1] !== '0') git(['push']);
+  } catch (e) {
+    console.warn(`  Git warning: could not publish local bazar commits (${firstLine(e)})`);
+  }
+  return true;
+}
+
+function firstLine(e) {
+  return String(e.stderr || e.message || e).trim().split('\n')[0];
+}
+
+// Push the current branch. A failure is reported (exit code 1, "Git error"
+// in the output) so the hooks log it and retry; the commit stays local and
+// gitPull publishes it on the next run.
+function gitPush() {
+  if (!getBazarRemote()) return true;
+  try { git(['push']); return true; }
+  catch (e) {
+    console.error(`  Git error: push failed, commit kept locally and retried on next run (${firstLine(e)})`);
+    process.exitCode = 1;
+    return false;
+  }
 }
 
 function gitCommitAndPush(message) {
   try {
-    execSync('git add -A', { cwd: BAZAR, stdio: 'pipe' });
-    const status = execSync('git status --porcelain', { cwd: BAZAR, encoding: 'utf8' });
-    if (!status.trim()) { console.log('  No changes to commit'); return false; }
-    execSync(`git commit -m "${message}"`, { cwd: BAZAR, stdio: 'pipe' });
-    try { execSync('git push', { cwd: BAZAR, stdio: 'pipe' }); } catch { /* no remote yet */ }
-    return true;
+    git(['add', '-A']);
+    if (!git(['status', '--porcelain']).trim()) { console.log('  No changes to commit'); return false; }
+    git(['commit', '-m', message]);
   } catch (e) {
-    console.error('  Git error:', e.message);
+    console.error('  Git error:', firstLine(e));
+    process.exitCode = 1;
     return false;
   }
+  return gitPush();
+}
+
+// Commit map.json alone (project registrations, item lists, paths), so the
+// bazar never keeps an uncommitted map.json that would block the next pull.
+function commitMap(message) {
+  try {
+    if (!git(['status', '--porcelain', '--', 'map.json']).trim()) return;
+    git(['add', 'map.json']);
+    git(['commit', '-m', message, '--', 'map.json']);
+  } catch (e) {
+    console.error('  Git error:', firstLine(e));
+    process.exitCode = 1;
+    return;
+  }
+  if (gitPush()) console.log('  map.json committed');
 }
 
 function getBazarCommit() {
@@ -213,15 +264,31 @@ function newProjectKey(projectRoot, map, name) {
   return key;
 }
 
+// The key recorded in the project's manifest, or null when there is none.
+function manifestKey(projectRoot) {
+  const mPath = manifestPath(projectRoot);
+  if (!existsSync(mPath)) return null;
+  try { return readJSON(mPath).project || null; } catch { return null; }
+}
+
+// The manifest key is authoritative. The folder name is used only when the
+// manifest records no key: falling back after a key went missing would hand
+// this project the config of a different project with the same folder name.
 function findProject(map, targetPath) {
-  let key = null;
-  const mPath = manifestPath(targetPath);
-  if (existsSync(mPath)) {
-    try { key = readJSON(mPath).project || null; } catch {}
-  }
-  if (!key || !(key in map.projects)) key = projectKey(targetPath);
+  const key = manifestKey(targetPath) || projectKey(targetPath);
   const config = map.projects[key];
   return config ? { key, config } : null;
+}
+
+function projectNotFound(projectRoot) {
+  const stored = manifestKey(projectRoot);
+  if (stored) {
+    console.error(`  Project key "${stored}" (from .claude/bazar.json) is not in map.json.`);
+    console.error('  Restore that entry in map.json, or run --init to register this project again.');
+  } else {
+    console.error(`  Project not found in map.json: ${norm(projectRoot)}`);
+  }
+  process.exit(1);
 }
 
 // Remember the local path of a project (per device, informational). Returns
@@ -242,10 +309,7 @@ function emptyConfig() {
 
 function syncProject(projectRoot, map) {
   const entry = findProject(map, projectRoot);
-  if (!entry) {
-    console.error(`  Project not found in map.json: ${norm(projectRoot)}`);
-    process.exit(1);
-  }
+  if (!entry) projectNotFound(projectRoot);
 
   const { config } = entry;
   const claudeDir = join(projectRoot, '.claude');
@@ -1106,7 +1170,7 @@ function listBazar(map) {
 
 function addItem(projectRoot, category, itemName, map, deployPath) {
   const entry = findProject(map, projectRoot);
-  if (!entry) { console.error(`  Project not in map.json: ${norm(projectRoot)}`); process.exit(1); }
+  if (!entry) projectNotFound(projectRoot);
 
   // Handle files category separately
   if (category === 'files') {
@@ -1140,7 +1204,7 @@ function addItem(projectRoot, category, itemName, map, deployPath) {
 
 function removeItemFromProject(projectRoot, category, itemName, map) {
   const entry = findProject(map, projectRoot);
-  if (!entry) { console.error(`  Project not in map.json`); process.exit(1); }
+  if (!entry) projectNotFound(projectRoot);
 
   // Handle files category separately
   if (category === 'files') {
@@ -1180,9 +1244,10 @@ function removeItemFromProject(projectRoot, category, itemName, map) {
 
 function initProject(projectRoot, fromPath, profileName, map, name) {
   const normRoot = norm(resolve(projectRoot));
-  const existing = existsSync(manifestPath(projectRoot)) ? findProject(map, projectRoot) : null;
-  if (existing) { console.error(`  Already in map.json: ${existing.key}`); process.exit(1); }
-  const key = newProjectKey(projectRoot, map, name);
+  const stored = manifestKey(projectRoot);
+  if (stored && stored in map.projects) { console.error(`  Already in map.json: ${stored}`); process.exit(1); }
+  // A manifest whose key was removed from map.json re-registers under that key.
+  const key = newProjectKey(projectRoot, map, name || stored);
 
   let config;
   if (profileName) {
@@ -1334,8 +1399,8 @@ function seedProject(projectRoot, name, map) {
   }
 
   // Update map (re-seeding a project already in the map keeps its key)
-  const existing = existsSync(manifestPath(projectRoot)) ? findProject(map, projectRoot) : null;
-  const key = existing ? existing.key : newProjectKey(projectRoot, map, null);
+  const stored = manifestKey(projectRoot);
+  const key = stored && stored in map.projects ? stored : newProjectKey(projectRoot, map, stored);
   config.paths = [normRoot];
   map.projects[key] = config;
   writeMap(map);
@@ -1486,7 +1551,7 @@ async function main() {
   console.log(`  bazar: ${norm(BAZAR)}`);
 
   // Pull latest before operations that read from bazar
-  if (['sync', 'diff', 'push'].includes(args.command)) {
+  if (['sync', 'diff', 'push', 'add', 'remove', 'init', 'seed'].includes(args.command)) {
     process.stdout.write('  pulling latest... ');
     const pulled = gitPull();
     pulled ? console.log('done') : console.log('skipped');
@@ -1564,6 +1629,12 @@ async function main() {
     }
     default:
       printUsage();
+  }
+
+  // Commands that edit map.json commit it right away, so the bazar never keeps
+  // an uncommitted map.json that would block the next pull on another device.
+  if (['sync', 'add', 'remove', 'init', 'seed'].includes(args.command)) {
+    commitMap(`map: ${args.command} ${args.all ? "all projects" : (findProject(readMap(), projectRoot)?.key || basename(projectRoot))}`);
   }
 
   console.log();

@@ -21,7 +21,9 @@ You are the single interface between the user and their Bazar system. The user s
 
 A central git repo (the bazar) holds all reusable `.claude/` content: skills, agents, commands, hooks, rules, CLAUDE.md files, settings, MCP configs, and arbitrary files. Each project is mapped in `map.json` to receive a specific selection of items. A manifest file in each project tracks what the bazar owns.
 
-Projects are keyed in `map.json` by a device-independent name (the folder name by default, or `--init --name <key>`), and the manifest records that key in its `project` field. The same repo is therefore recognized on every machine, wherever it is cloned. If a different project with the same folder name already exists, `--init` mints a short suffix once (`api-7f3a`) and prints it. Each project's `paths` array just lists where it has been seen; `--all` uses the ones that exist on the current device.
+Projects are keyed in `map.json` by a device-independent name (the folder name by default, or `--init --name <key>`), and the manifest records that key in its `project` field. The same repo is therefore recognized on every machine, wherever it is cloned. If a different project with the same folder name already exists, `--init` mints a short suffix once (`api-7f3a`) and prints it. The manifest key is authoritative: if it is missing from `map.json`, sync/add/remove stop with an error instead of falling back to the folder name (re-run `--init` to register the project again under the same key).
+
+Commands that edit `map.json` (`sync`, `--add`, `--remove`, `--init`, `--seed`) commit and push it immediately, so the bazar never keeps an uncommitted `map.json` that would block the next pull on another device. If a push fails (e.g. offline), the commit stays local, the command reports `Git error`, and the next run publishes it (pull falls back to a rebase when this device has local commits). Each project's `paths` array just lists where it has been seen; `--all` uses the ones that exist on the current device.
 
 **Key concepts:**
 
