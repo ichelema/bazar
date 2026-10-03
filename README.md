@@ -151,7 +151,7 @@ The BazarHook keeps project and bazar aligned without manual pushes.
 
 Both auto-pushes are additive: they never delete bazar files that are absent on this device.
 
-Disable/enable via `/bazar disable auto-sync` or `/bazar enable auto-sync`.
+Every sync keeps the two hook entries registered in the project's `settings.json`, even when that file is managed by the bazar. Disable/enable via `/bazar disable auto-sync` or `/bazar enable auto-sync` (which removes or adds the `BazarHook` item).
 
 ## Repository Structure
 

@@ -524,10 +524,10 @@ MCP configs are stored as `mcp-configs/{name}.json` in the bazar. Platform varia
 
 **Triggers:** "disable auto-sync", "turn off bazar hook", "enable auto-sync", "turn on bazar hook"
 
-Edit `.claude/settings.json`:
+Every sync of a project that maps `BazarHook` re-adds missing `Stop`/`SessionStart` entries to `.claude/settings.json`, so deleting them by hand does not last.
 
-- To disable: remove the `Stop` entry that points at `bazar-sync.mjs` and the `SessionStart` entry that points at `bazar-session-start.mjs`
-- To enable: add them back as shown in First-Time Setup step 4
+- To disable: `node {bazar_path}/sync.mjs --remove hooks BazarHook --project "{cwd}"`, then remove the `Stop` entry pointing at `bazar-sync.mjs` and the `SessionStart` entry pointing at `bazar-session-start.mjs` (and from the bazar's copy too, if `settings.json` is bazar-managed)
+- To enable: `node {bazar_path}/sync.mjs --add hooks BazarHook --project "{cwd}"`; the sync registers the entries automatically
 
 ---
 

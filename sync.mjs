@@ -431,6 +431,10 @@ function syncProject(projectRoot, map) {
     }
   }
 
+  // Keep the auto-sync hooks registered: a settings.json copied from the bazar
+  // may lack them. Runs before the base hashes so a push publishes the result.
+  if ('BazarHook' in managed.hooks) ensureBazarHooks(projectRoot);
+
   // Build ignore map for manifest (only items this project uses)
   const ignoreForManifest = {};
   for (const cat of DIR_CATEGORIES) {
@@ -1291,9 +1295,12 @@ const BAZAR_HOOKS = [
   { event: 'SessionStart', matcher: 'startup|resume', script: 'bazar-session-start.mjs', timeout: 60 },
 ];
 
-// One-shot at init: register the BazarHook entries in the project's own
-// settings.json (created if missing). Not recorded in the manifest, so later
-// syncs never touch the rest of the file.
+// Register the BazarHook entries in the project's settings.json (created if
+// missing). Called at init and after every sync of a project that maps
+// BazarHook, so a bazar-managed settings.json without these entries cannot
+// silently switch auto-sync off. Only missing entries are added; existing
+// (possibly customised) ones are left alone. To turn auto-sync off for good,
+// remove the hook item: `--remove hooks BazarHook`.
 function ensureBazarHooks(projectRoot) {
   const setPath = join(projectRoot, '.claude', 'settings.json');
   let settings = {};
@@ -1306,7 +1313,7 @@ function ensureBazarHooks(projectRoot) {
   for (const { event, matcher, script, timeout } of BAZAR_HOOKS) {
     settings.hooks[event] ??= [];
     const present = settings.hooks[event].some(g => (g.hooks || []).some(h => h.command?.includes(script)));
-    if (present) { console.log(`  ${event} hook already in settings.json`); continue; }
+    if (present) continue;
     const command = `node "$CLAUDE_PROJECT_DIR/.claude/hooks/BazarHook/${script}"`;
     settings.hooks[event].push({ ...(matcher && { matcher }), hooks: [{ type: 'command', command, timeout }] });
     console.log(`  Added BazarHook ${event} entry to settings.json`);
