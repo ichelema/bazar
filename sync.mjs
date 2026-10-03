@@ -1572,6 +1572,77 @@ function seedProject(projectRoot, name, map) {
   }
 }
 
+// ── UPGRADE (template -> this bazar, engine files only) ────────────────────
+
+// Files that make up the Bazar engine. --upgrade replaces exactly these with
+// the template's version; everything else (skills, agents, map.json, settings,
+// profiles, README, ...) is user data and is never touched.
+const ENGINE_PATHS = [
+  'sync.mjs',
+  'lib',
+  'hooks/BazarHook',
+  'commands/bazar.md',
+  '.claude/commands/bazar.md',
+  '.gitattributes',
+];
+
+// A bazar created from the GitHub template shares no git history with it, so
+// it never receives engine fixes by itself. Fetch the template (URL from
+// map.json "template") and overwrite the engine paths with its version.
+async function upgradeEngine(map, skipConfirm) {
+  const url = map.template;
+  if (!url) {
+    console.error('  No "template" in map.json. Add e.g. "template": "https://github.com/ichelema/bazar.git".');
+    process.exitCode = 1;
+    return;
+  }
+  const normUrl = u => String(u).trim().toLowerCase().replace(/\.git$/, '');
+  if (normUrl(url) === normUrl(getBazarRemote())) {
+    console.log('  This is the template itself: nothing to upgrade.');
+    return;
+  }
+  if (git(['status', '--porcelain', '--', ...ENGINE_PATHS]).trim()) {
+    console.error('  REFUSED: engine files have uncommitted changes here. Commit or discard them first:');
+    console.error(git(['status', '--short', '--', ...ENGINE_PATHS]).replace(/^/gm, '    ').trimEnd());
+    process.exitCode = 1;
+    return;
+  }
+
+  process.stdout.write(`  fetching template ${url}... `);
+  try { git(['fetch', '--quiet', '--no-tags', url, 'HEAD']); }
+  catch (e) { console.log('failed'); console.error('  Git error:', firstLine(e)); process.exitCode = 1; return; }
+  const sha = git(['rev-parse', '--short', 'FETCH_HEAD']).trim();
+  console.log(`done (${sha})`);
+
+  // Changes between this bazar and the template, engine paths only
+  // (A = new in template, M = changed, D = removed from template).
+  const changes = git(['diff', '--name-status', '--no-renames', 'HEAD', 'FETCH_HEAD', '--', ...ENGINE_PATHS])
+    .trim().split('\n').filter(Boolean).map(l => { const [s, f] = l.split('\t'); return { s, f }; });
+  if (!changes.length) { console.log(`  Engine already up to date with template ${sha}`); return; }
+
+  console.log('\n  Engine changes from the template:');
+  for (const { s, f } of changes) console.log(`    ${s === 'A' ? 'new    ' : s === 'D' ? 'removed' : 'changed'}  ${f}`);
+  if (!skipConfirm) {
+    const ok = await confirm(`\n  Apply ${changes.length} change(s) and commit? (y/n) `);
+    if (!ok) { console.log('  Aborted'); return; }
+  }
+
+  const updated = changes.filter(c => c.s !== 'D').map(c => c.f);
+  const removed = changes.filter(c => c.s === 'D').map(c => c.f);
+  try {
+    if (updated.length) git(['checkout', 'FETCH_HEAD', '--', ...updated]);
+    if (removed.length) git(['rm', '--quiet', '--', ...removed]);
+    git(['commit', '--quiet', '-m', `upgrade engine from template ${sha}`, '--', ...updated, ...removed]);
+  } catch (e) {
+    console.error('  Git error:', firstLine(e));
+    process.exitCode = 1;
+    return;
+  }
+  console.log(`  Upgraded ${changes.length} engine file(s) to template ${sha}`);
+  if (gitPush()) console.log('  Committed and pushed');
+  console.log('  Projects get the new BazarHook and /bazar on their next sync.');
+}
+
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
 function parseArgs() {
@@ -1593,6 +1664,7 @@ function parseArgs() {
       case '--init': parsed.command = 'init'; break;
       case '--link': parsed.command = 'link'; break;
       case '--unlink': parsed.command = 'unlink'; break;
+      case '--upgrade': parsed.command = 'upgrade'; break;
       case '--project': parsed.project = args[++i]; break;
       case '--from': parsed.from = args[++i]; break;
       case '--name': parsed.name = args[++i]; break;
@@ -1651,6 +1723,7 @@ function printUsage() {
     --seed [--name <slug>]            Import project into bazar (initial setup)
     --link                            Register this bazar's local path on this device (~/.claude/bazar-paths.json)
     --unlink                          Remove this bazar's path entry from this device
+    --upgrade [-y]                    Update engine files (sync.mjs, lib/, BazarHook, /bazar) from the template in map.json "template"
 
   Options:
     --project <path>    Target specific project (default: cwd)
@@ -1692,11 +1765,11 @@ async function main() {
   console.log(`  bazar: ${norm(BAZAR)}`);
 
   // Pull latest before operations that read from bazar
-  if (['sync', 'diff', 'push', 'add', 'remove', 'init', 'seed'].includes(args.command)) {
+  if (['sync', 'diff', 'push', 'add', 'remove', 'init', 'seed', 'upgrade'].includes(args.command)) {
     process.stdout.write('  pulling latest... ');
     const pulled = gitPull();
     pulled ? console.log('done') : console.log('skipped');
-    pushPullFailed = args.command === 'push' && Boolean(getBazarRemote()) && !pulled;
+    pushPullFailed = ['push', 'upgrade'].includes(args.command) && Boolean(getBazarRemote()) && !pulled;
   }
 
   const map = readMap();
@@ -1778,6 +1851,14 @@ async function main() {
       console.log(removed ? `  Unlinked ${remote} from this device` : `  No registry entry for ${remote}`);
       break;
     }
+    case 'upgrade':
+      if (pushPullFailed) {
+        console.error('  REFUSED: git pull --ff-only failed; bazar freshness is unknown.');
+        process.exitCode = 1;
+        break;
+      }
+      await upgradeEngine(map, args.yes);
+      break;
     default:
       printUsage();
   }

@@ -153,6 +153,16 @@ Both auto-pushes are additive: they never delete bazar files that are absent on 
 
 Every sync keeps the two hook entries registered in the project's `settings.json`, even when that file is managed by the bazar. Disable/enable via `/bazar disable auto-sync` or `/bazar enable auto-sync` (which removes or adds the `BazarHook` item).
 
+## Upgrading
+
+A bazar created from this template does not share its git history, so engine fixes do not arrive by themselves. Run:
+
+```bash
+node sync.mjs --upgrade
+```
+
+It fetches the template named in `map.json` (`"template"`), shows which engine files changed (`sync.mjs`, `lib/`, `hooks/BazarHook/`, `commands/bazar.md`, `.claude/commands/bazar.md`, `.gitattributes`), and after confirmation commits and pushes them. Your skills, agents, `map.json`, settings and README are never touched.
+
 ## Repository Structure
 
 ```

@@ -1,5 +1,6 @@
 {
   "$schema": "bazar-map-v1",
+  "template": "https://github.com/ichelema/bazar.git",
   "ignore": {
     "BazarHook": [
       "logs",

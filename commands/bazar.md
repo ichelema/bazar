@@ -544,6 +544,21 @@ Every sync of a project that maps `BazarHook` re-adds missing `Stop`/`SessionSta
 
 ---
 
+### Upgrade the Engine
+
+**Triggers:** "upgrade", "update the engine", "update bazar", "get the latest sync.mjs", "update from the template"
+
+A bazar created from the GitHub template shares no git history with it, so engine fixes do not arrive by themselves. `--upgrade` fetches the template named in `map.json` (`"template"`) and replaces only the engine files: `sync.mjs`, `lib/`, `hooks/BazarHook/`, `commands/bazar.md`, `.claude/commands/bazar.md`, `.gitattributes`. Skills, agents, `map.json`, settings, profiles and README are never touched.
+
+```bash
+node {bazar_path}/sync.mjs --upgrade        # lists the changes, asks, then commits and pushes
+node {bazar_path}/sync.mjs --upgrade --yes  # no confirmation
+```
+
+It refuses if engine files have uncommitted local changes. Projects receive the new `BazarHook` and `/bazar` on their next sync.
+
+---
+
 ### Troubleshooting
 
 **Triggers:** "sync isn't working", "push failed", "manifest missing", "bazar error"
