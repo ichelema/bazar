@@ -437,7 +437,18 @@ node {bazar_path}/sync.mjs --project "{cwd}"
 node {bazar_path}/sync.mjs --seed --name "{slug}" --project "{cwd}"
 ```
 
-3. Report what was imported
+3. Report what was imported, including any variants or renamed config files the output mentions
+
+Seed never overwrites an item other projects may use:
+
+- Free name: imported under its own name.
+- Same name, identical content: only mapped, nothing copied.
+- Same name, different content: imported as the variant `{name}--{project-key}`, which deploys as `{name}` in this project only.
+- Engine items (`hooks/BazarHook`, `commands/bazar`): never imported, the project is mapped to the bazar's version.
+- `CLAUDE.md` / `settings.json` / `.mcp.json` whose `{slug}` file already exists with different content: imported as `{slug}-xxxx`.
+- Re-seeding the same project updates its own variants and config files in place.
+
+Seed does not commit the imported items (only `map.json`); commit the bazar afterwards.
 
 ---
 

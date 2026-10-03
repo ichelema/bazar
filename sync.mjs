@@ -1366,88 +1366,112 @@ function ensureBazarHooks(projectRoot) {
 
 // ── SEED (project -> bazar, initial population) ────────────────────────────
 
+// Items that belong to the Bazar engine itself: a project's (possibly older)
+// copy is never imported, the project is just mapped to the bazar's version.
+const ENGINE_ITEMS = { hooks: ['BazarHook'], commands: ['bazar'] };
+
+// Import one project item into the bazar without clobbering a same-named item
+// other projects may use. Returns { full, how }: the bazar name to map and
+// what happened ('new' | 'same' | 'variant' | 'updated' | 'engine').
+//   free name                    -> imported under its own name
+//   same name, identical content -> just mapped, nothing copied
+//   same name, different content -> imported as variant `<name>--<project key>`
+//                                   (deploys as `<name>` in this project only)
+//   re-seed of this project's own variant -> that variant is updated
+function importItem(cat, deploy, src, key, ownFull, map) {
+  const isDir = DIR_CATEGORIES.includes(cat);
+  const patterns = isDir ? getIgnorePatterns(deploy, map.ignore) : [];
+  const exists = full => existsSync(bazarItemPath(cat, full));
+  const same = full => hashPath(bazarItemPath(cat, full), patterns) === hashPath(src, patterns);
+  const place = full => {
+    const dest = bazarItemPath(cat, full);
+    if (isDir) pushDirSyncIgnoreAware(src, dest, patterns, true);
+    else copyFile(src, dest);
+    return full;
+  };
+
+  if ((ENGINE_ITEMS[cat] || []).includes(deploy) && exists(deploy)) return { full: deploy, how: 'engine' };
+  if (ownFull && ownFull !== deploy && exists(ownFull)) {
+    return same(ownFull) ? { full: ownFull, how: 'same' } : { full: place(ownFull), how: 'updated' };
+  }
+  if (!exists(deploy)) return { full: place(deploy), how: 'new' };
+  if (same(deploy)) return { full: deploy, how: 'same' };
+  const variant = `${deploy}--${key}`;
+  if (exists(variant) && same(variant)) return { full: variant, how: 'same' };
+  return { full: place(variant), how: 'variant' };
+}
+
+// Import CLAUDE.md / settings.json / .mcp.json under `name`. A same-named
+// file owned by another project (different content) is never overwritten:
+// a short suffix is minted instead, as for project keys.
+function importConfigFile(src, dir, ext, name, owned) {
+  const at = n => join(BAZAR, dir, n + ext);
+  let target = name;
+  if (!owned) {
+    while (existsSync(at(target)) && hashPath(at(target)) !== hashPath(src)) {
+      target = `${name}-${randomBytes(2).toString('hex')}`;
+    }
+  }
+  copyFile(src, at(target));
+  if (target !== name) console.log(`  ${dir}/${name}${ext} belongs to another project, imported as ${target}${ext}`);
+  return target;
+}
+
 function seedProject(projectRoot, name, map) {
   const normRoot = norm(resolve(projectRoot));
   const claudeDir = join(projectRoot, '.claude');
 
   if (!existsSync(claudeDir)) { console.error(`  No .claude dir at ${projectRoot}`); process.exit(1); }
 
+  // Key first: same-named items with different content become variants of it.
+  // Re-seeding a project already in the map keeps its key and its variants.
+  const stored = manifestKey(projectRoot);
+  const old = stored && map.projects[stored] ? map.projects[stored] : null;
+  const key = old ? stored : newProjectKey(projectRoot, map, stored);
+
   const config = emptyConfig();
   let imported = 0;
 
-  // Skills (directories)
-  const skillsDir = join(claudeDir, 'skills');
-  if (existsSync(skillsDir)) {
-    for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      copyDir(join(skillsDir, entry.name), join(BAZAR, 'skills', entry.name));
-      config.skills.push(entry.name);
-      imported++;
+  const sources = {
+    skills: { dir: 'skills', isDir: true },
+    agents: { dir: 'agents', isDir: false },
+    commands: { dir: 'commands', isDir: false },
+    hooks: { dir: 'hooks', isDir: true },
+  };
+  for (const [cat, { dir, isDir }] of Object.entries(sources)) {
+    const catDir = join(claudeDir, dir);
+    if (!existsSync(catDir)) continue;
+    for (const entry of readdirSync(catDir, { withFileTypes: true })) {
+      if (isDir ? !entry.isDirectory() : !(entry.isFile() && entry.name.endsWith('.md'))) continue;
+      const deploy = isDir ? entry.name : entry.name.slice(0, -3);
+      const ownFull = (old?.[cat] || []).find(i => parseItemName(i).deploy === deploy);
+      const { full, how } = importItem(cat, deploy, join(catDir, entry.name), key, ownFull, map);
+      config[cat].push(full);
+      if (how === 'variant') console.log(`  ${cat}/${deploy} exists in the bazar with different content: imported as variant ${full}`);
+      if (how === 'engine') console.log(`  ${cat}/${deploy}: engine item, using the bazar's version`);
+      if (how === 'updated') console.log(`  ${cat}/${deploy}: updated this project's variant ${full}`);
+      if (how === 'new' || how === 'variant' || how === 'updated') imported++;
     }
   }
 
-  // Agents (.md files only)
-  const agentsDir = join(claudeDir, 'agents');
-  if (existsSync(agentsDir)) {
-    for (const entry of readdirSync(agentsDir, { withFileTypes: true })) {
-      if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
-      copyFile(join(agentsDir, entry.name), join(BAZAR, 'agents', entry.name));
-      config.agents.push(entry.name.replace('.md', ''));
-      imported++;
-    }
-  }
-
-  // Commands (.md files only, skip archive/)
-  const cmdsDir = join(claudeDir, 'commands');
-  if (existsSync(cmdsDir)) {
-    for (const entry of readdirSync(cmdsDir, { withFileTypes: true })) {
-      if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
-      copyFile(join(cmdsDir, entry.name), join(BAZAR, 'commands', entry.name));
-      config.commands.push(entry.name.replace('.md', ''));
-      imported++;
-    }
-  }
-
-  // Hooks (directories only)
-  const hooksDir = join(claudeDir, 'hooks');
-  if (existsSync(hooksDir)) {
-    for (const entry of readdirSync(hooksDir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      copyDir(join(hooksDir, entry.name), join(BAZAR, 'hooks', entry.name));
-      config.hooks.push(entry.name);
-      imported++;
-    }
-  }
-
-  // CLAUDE.md
   if (name) {
-    const cmdPath = join(projectRoot, 'CLAUDE.md');
-    if (existsSync(cmdPath)) {
-      copyFile(cmdPath, join(BAZAR, 'claude-mds', name + '.md'));
-      config['claude-md'] = name;
-      imported++;
-    }
-
-    // settings.json
-    const setPath = join(claudeDir, 'settings.json');
-    if (existsSync(setPath)) {
-      copyFile(setPath, join(BAZAR, 'settings', name + '.json'));
-      config.settings = name;
-      imported++;
-    }
-
-    // .mcp.json
-    const mcpPath = join(projectRoot, '.mcp.json');
-    if (existsSync(mcpPath)) {
-      copyFile(mcpPath, join(BAZAR, 'mcp-configs', name + '.json'));
-      config.mcp = name;
+    const files = [
+      { field: 'claude-md', src: join(projectRoot, 'CLAUDE.md'), dir: 'claude-mds', ext: '.md' },
+      { field: 'settings', src: join(claudeDir, 'settings.json'), dir: 'settings', ext: '.json' },
+      { field: 'mcp', src: join(projectRoot, '.mcp.json'), dir: 'mcp-configs', ext: '.json' },
+    ];
+    for (const { field, src, dir, ext } of files) {
+      if (!existsSync(src)) continue;
+      // Re-seed: reuse the file this project already owns (`name` or a
+      // suffixed `name-xxxx` minted by an earlier seed).
+      const own = old?.[field];
+      const owned = own && (own === name || own.startsWith(`${name}-`)) ? own : null;
+      config[field] = importConfigFile(src, dir, ext, owned || name, Boolean(owned));
       imported++;
     }
   }
 
-  // Update map (re-seeding a project already in the map keeps its key)
-  const stored = manifestKey(projectRoot);
-  const key = stored && stored in map.projects ? stored : newProjectKey(projectRoot, map, stored);
+  // Update map
   config.paths = [normRoot];
   map.projects[key] = config;
   writeMap(map);
@@ -1474,8 +1498,11 @@ function seedProject(projectRoot, name, map) {
   // Merge any existing rule files into master
   pushRuleFiles(projectRoot);
 
-  console.log(`  Imported ${imported} items from ${norm(projectRoot)}`);
-  if (name) console.log(`  claude-md -> ${name}.md, settings -> ${name}.json${config.mcp ? `, mcp -> ${name}.json` : ''}`);
+  console.log(`  Imported ${imported} items from ${norm(projectRoot)} as project "${key}"`);
+  if (name) {
+    const used = ['claude-md', 'settings', 'mcp'].filter(f => config[f]).map(f => `${f} -> ${config[f]}`);
+    if (used.length) console.log(`  ${used.join(', ')}`);
+  }
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
