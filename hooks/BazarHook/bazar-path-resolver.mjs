@@ -29,7 +29,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, platform } from 'node:os';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -193,7 +193,9 @@ function listSubdirs(dir) {
 
 function getRemoteForDir(dir) {
   try {
-    const out = execSync('git -C "' + dir + '" remote get-url origin', {
+    // Arguments passed directly (no shell), so folder names with quotes or $
+    // can neither break the command nor run anything.
+    const out = execFileSync('git', ['-C', dir, 'remote', 'get-url', 'origin'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     });
