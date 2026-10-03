@@ -13,6 +13,7 @@ import {
 import { join, basename, dirname, resolve, relative } from 'node:path';
 import { execSync, execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
+import { hostname } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 import { writePathRegistry, removePathRegistryEntry, readPathRegistry } from './lib/bazar-path-resolver.mjs';
@@ -297,7 +298,7 @@ function writeMap(map) { writeJSON(join(BAZAR, 'map.json'), map); }
 // Projects are keyed in map.json by a device-independent name (the folder
 // name by default). The project's manifest records that key, so the same
 // repo is recognized on every machine regardless of where it is cloned.
-// `config.paths` only lists where the project has been seen, for --all.
+// `config.paths` lists, per device, where the project lives (for --all).
 function projectKey(projectRoot) {
   return basename(resolve(projectRoot));
 }
@@ -341,14 +342,51 @@ function projectNotFound(projectRoot) {
   process.exit(1);
 }
 
-// Remember the local path of a project (per device, informational). Returns
-// true when map.json changed.
-function rememberProjectPath(entry, projectRoot) {
+// Where a project lives, per device: `config.paths` is `{ <hostname>: [paths] }`.
+// Each device only ever edits its own list, so devices never drop each other's
+// entries. Used by --all.
+const HOST = hostname();
+
+// This device's path list for a project (migrates the legacy flat array: the
+// entries that exist here are kept, other devices re-add theirs on next sync).
+function ownPaths(config) {
+  if (Array.isArray(config.paths)) {
+    const local = config.paths.filter(p => existsSync(p));
+    config.paths = local.length ? { [HOST]: local } : {};
+  }
+  config.paths ??= {};
+  return config.paths[HOST] || [];
+}
+
+function setOwnPaths(config, list) {
+  if (list.length) config.paths[HOST] = list;
+  else delete config.paths[HOST];
+}
+
+// True when `dir` really holds project `key`: it must have a manifest naming
+// that key (or, for a legacy manifest without a key, the same folder name).
+// A folder without a manifest is never treated as a known project.
+function holdsProject(dir, key) {
+  if (!existsSync(manifestPath(dir))) return false;
+  return (manifestKey(dir) || projectKey(dir)) === key;
+}
+
+// Record `projectRoot` in this device's list for `key` and drop this device's
+// stale entries (missing folders, or folders now holding another project).
+// Returns true when map.json changed.
+function rememberProjectPath(key, config, projectRoot) {
+  const before = JSON.stringify(config.paths ?? null);
   const here = norm(resolve(projectRoot));
-  entry.config.paths ??= [];
-  if (entry.config.paths.includes(here)) return false;
-  entry.config.paths.push(here);
-  return true;
+  const list = ownPaths(config);
+  const kept = list.filter(p => p === here || holdsProject(p, key));
+  if (!kept.includes(here)) kept.push(here);
+  setOwnPaths(config, kept);
+  return JSON.stringify(config.paths) !== before;
+}
+
+function formatPaths(paths) {
+  if (Array.isArray(paths)) return paths.join(', ');
+  return Object.entries(paths || {}).map(([h, l]) => `${h}: ${l.join(', ')}`).join(' | ');
 }
 
 function emptyConfig() {
@@ -364,7 +402,7 @@ function syncProject(projectRoot, map) {
   const { config } = entry;
   const claudeDir = join(projectRoot, '.claude');
   ensureDir(claudeDir);
-  if (rememberProjectPath(entry, projectRoot)) writeMap(map);
+  if (rememberProjectPath(entry.key, config, projectRoot)) writeMap(map);
 
   // Read old manifest for cleanup
   let oldManifest = null;
@@ -1218,7 +1256,7 @@ function listBazar(map) {
       + (config['claude-md'] ? 1 : 0) + (config.settings ? 1 : 0) + (config.mcp ? 1 : 0)
       + Object.keys(config.files || {}).length;
     console.log(`  ${key} (${total} items)`);
-    if (config.paths?.length) console.log(`    paths: ${config.paths.join(', ')}`);
+    if (formatPaths(config.paths)) console.log(`    paths: ${formatPaths(config.paths)}`);
     for (const cat of CATEGORIES) {
       const items = config[cat] || [];
       if (items.length) console.log(`    ${cat}: ${items.join(', ')}`);
@@ -1341,7 +1379,8 @@ function initProject(projectRoot, fromPath, profileName, map, name) {
 
   // Ensure files field exists
   if (!config.files) config.files = {};
-  config.paths = [normRoot];
+  config.paths = {};
+  rememberProjectPath(key, config, projectRoot);
 
   map.projects[key] = config;
   writeMap(map);
@@ -1446,7 +1485,6 @@ function importConfigFile(src, dir, ext, name, owned) {
 }
 
 function seedProject(projectRoot, name, map) {
-  const normRoot = norm(resolve(projectRoot));
   const claudeDir = join(projectRoot, '.claude');
 
   if (!existsSync(claudeDir)) { console.error(`  No .claude dir at ${projectRoot}`); process.exit(1); }
@@ -1500,7 +1538,8 @@ function seedProject(projectRoot, name, map) {
   }
 
   // Update map
-  config.paths = [normRoot];
+  config.paths = old?.paths ?? {};
+  rememberProjectPath(key, config, projectRoot);
   map.projects[key] = config;
   writeMap(map);
 
@@ -1677,14 +1716,24 @@ async function main() {
   switch (args.command) {
     case 'sync':
       if (args.all) {
+        // Only this device's paths, and only folders whose manifest names the
+        // project: a stale path now holding something else is dropped, never
+        // synced into.
+        const pathsBefore = JSON.stringify(Object.values(map.projects).map(c => c.paths ?? null));
         for (const [key, config] of Object.entries(map.projects)) {
-          const paths = (config.paths || []).filter(p => existsSync(p));
-          if (!paths.length) { console.log(`\n  -> ${key}: not present on this device, skipped`); continue; }
-          for (const path of paths) {
+          const list = ownPaths(config);
+          const valid = list.filter(p => holdsProject(p, key));
+          if (valid.length !== list.length) {
+            for (const p of list.filter(p => !valid.includes(p))) console.log(`  ${key}: dropped stale path ${p}`);
+            setOwnPaths(config, valid);
+          }
+          if (!valid.length) { console.log(`\n  -> ${key}: not present on this device, skipped`); continue; }
+          for (const path of valid) {
             console.log(`\n  -> ${key} (${norm(path)})`);
             syncProject(resolve(path), map);
           }
         }
+        if (JSON.stringify(Object.values(map.projects).map(c => c.paths ?? null)) !== pathsBefore) writeMap(map);
       } else {
         syncProject(projectRoot, map);
       }

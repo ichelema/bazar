@@ -23,7 +23,7 @@ A central git repo (the bazar) holds all reusable `.claude/` content: skills, ag
 
 Projects are keyed in `map.json` by a device-independent name (the folder name by default, or `--init --name <key>`), and the manifest records that key in its `project` field. The same repo is therefore recognized on every machine, wherever it is cloned. If a different project with the same folder name already exists, `--init` mints a short suffix once (`api-7f3a`) and prints it. The manifest key is authoritative: if it is missing from `map.json`, sync/add/remove stop with an error instead of falling back to the folder name (re-run `--init` to register the project again under the same key).
 
-Commands that edit `map.json` (`sync`, `--add`, `--remove`, `--init`, `--seed`) commit and push it immediately, so the bazar never keeps an uncommitted `map.json` that would block the next pull on another device. If a push fails (e.g. offline), the commit stays local, the command reports `Git error`, and the next run publishes it (pull falls back to a rebase when this device has local commits). Each project's `paths` array just lists where it has been seen; `--all` uses the ones that exist on the current device.
+Commands that edit `map.json` (`sync`, `--add`, `--remove`, `--init`, `--seed`) commit and push it immediately, so the bazar never keeps an uncommitted `map.json` that would block the next pull on another device. If a push fails (e.g. offline), the commit stays local, the command reports `Git error`, and the next run publishes it (pull falls back to a rebase when this device has local commits). Each project's `paths` is `{ <hostname>: [paths] }`: every device keeps and prunes only its own list (missing folders, or folders now holding another project, are dropped). `--all` syncs only this device's paths whose `.claude/bazar.json` names that project, so a stale path is never synced into.
 
 **Key concepts:**
 
@@ -310,7 +310,7 @@ If the item doesn't exist in the bazar, ask: "That item doesn't exist in the baz
 1. Read `map.json` to find target projects
 2. If "all": iterate every project
 3. If "all dev projects": iterate projects using the `dev` profile (match by comparing their config against the profile)
-4. For each target project, using a path from its `paths` that exists on this device:
+4. For each target project, using a path from its `paths[<this hostname>]` list:
 
 ```bash
 node {bazar_path}/sync.mjs --add {category} {item} --project "{path}"

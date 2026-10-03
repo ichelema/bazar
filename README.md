@@ -182,7 +182,7 @@ your-bazar/
 - **Hash-based diff.** MD5 comparison for files and directories
 - **Ignore patterns.** Configure in `map.json` to exclude runtime artifacts from sync
 - **Per-device bazar path** stored in `~/.claude/bazar-paths.json` (gitignored, never shipped). Run `node sync.mjs --link` once per machine to register. The `CLAUDE_BAZAR_PATH` environment variable overrides it.
-- **Multi-machine projects.** Projects are keyed in `map.json` by folder name, and `.claude/bazar.json` records that key, so the same repo is recognized on Windows and Linux regardless of where it is cloned. `paths` lists where each project has been seen; `--all` syncs the ones present on the current device.
+- **Multi-machine projects.** Projects are keyed in `map.json` by folder name, and `.claude/bazar.json` records that key, so the same repo is recognized on Windows and Linux regardless of where it is cloned. `paths` lists, per device (hostname), where each project lives; each device prunes only its own list, and `--all` syncs only folders whose manifest names that project.
 - **Stable manifest.** `.claude/bazar.json` (committed) holds only the project key, bazar remote and managed items, so it changes only when the item list changes. Per-device sync state goes to `.claude/bazar.state.json`, which every sync adds to the project's `.gitignore`.
 
 ## Credits
