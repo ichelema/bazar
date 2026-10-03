@@ -1,5 +1,7 @@
 # Bazar
 
+English | [Italiano](README_ITA.md)
+
 If you use Claude Code across multiple projects, you're probably copying the same skills, agents, and settings between them. When you improve a skill in one project, the others fall behind. When you set up a new project, you manually reconstruct the `.claude/` folder from memory.
 
 Bazar solves that. One repo holds everything. Each project picks what it needs. Changes flow both ways. The entire system is controlled through natural language via the `/bazar` command.
