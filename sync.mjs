@@ -12,7 +12,7 @@ import {
 } from 'node:fs';
 import { join, basename, dirname, resolve, relative } from 'node:path';
 import { execSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 import { writePathRegistry, removePathRegistryEntry, readPathRegistry } from './lib/bazar-path-resolver.mjs';
@@ -199,6 +199,18 @@ function writeMap(map) { writeJSON(join(BAZAR, 'map.json'), map); }
 // `config.paths` only lists where the project has been seen, for --all.
 function projectKey(projectRoot) {
   return basename(resolve(projectRoot));
+}
+
+// Key for a project being added to map.json: `--name` if given, else the
+// folder name. On a clash with an existing entry (a different project with
+// the same folder name) a short random suffix is minted once; the key is then
+// frozen in the project's manifest, so no later run ever recomputes it.
+function newProjectKey(projectRoot, map, name) {
+  const base = name || projectKey(projectRoot);
+  let key = base;
+  while (key in map.projects) key = `${base}-${randomBytes(2).toString('hex')}`;
+  if (key !== base) console.log(`  Name "${base}" already taken by another project, using "${key}"`);
+  return key;
 }
 
 function findProject(map, targetPath) {
@@ -1122,7 +1134,7 @@ function addItem(projectRoot, category, itemName, map, deployPath) {
 
   entry.config[category].push(itemName);
   writeMap(map);
-  console.log(`  Added ${category}/${itemName} to ${basename(projectRoot)}`);
+  console.log(`  Added ${category}/${itemName} to ${entry.key}`);
   syncProject(projectRoot, map);
 }
 
@@ -1166,10 +1178,11 @@ function removeItemFromProject(projectRoot, category, itemName, map) {
 
 // ── INIT ─────────────────────────────────────────────────────────────────────
 
-function initProject(projectRoot, fromPath, profileName, map) {
+function initProject(projectRoot, fromPath, profileName, map, name) {
   const normRoot = norm(resolve(projectRoot));
-  const key = projectKey(projectRoot);
-  if (findProject(map, projectRoot)) { console.error(`  Already in map.json: ${key}`); process.exit(1); }
+  const existing = existsSync(manifestPath(projectRoot)) ? findProject(map, projectRoot) : null;
+  if (existing) { console.error(`  Already in map.json: ${existing.key}`); process.exit(1); }
+  const key = newProjectKey(projectRoot, map, name);
 
   let config;
   if (profileName) {
@@ -1196,6 +1209,11 @@ function initProject(projectRoot, fromPath, profileName, map) {
   map.projects[key] = config;
   writeMap(map);
   console.log(`  Added ${key} (${normRoot}) to map.json`);
+
+  // Claim the key in a stub manifest first, so the sync below resolves this
+  // project by key and not by folder name (which may belong to another one).
+  ensureDir(join(projectRoot, '.claude'));
+  writeJSON(manifestPath(projectRoot), { project: key });
 
   // First sync right away: it writes the manifest the hooks need. Runs
   // before ensureBazarHooks so a profile settings.json can't drop them.
@@ -1315,8 +1333,9 @@ function seedProject(projectRoot, name, map) {
     }
   }
 
-  // Update map
-  const key = projectKey(projectRoot);
+  // Update map (re-seeding a project already in the map keeps its key)
+  const existing = existsSync(manifestPath(projectRoot)) ? findProject(map, projectRoot) : null;
+  const key = existing ? existing.key : newProjectKey(projectRoot, map, null);
   config.paths = [normRoot];
   map.projects[key] = config;
   writeMap(map);
@@ -1421,7 +1440,7 @@ function printUsage() {
     --list                            List projects, profiles, items, and variants
     --add <cat> <name> [deploy-path]  Add item to current project
     --remove <cat> <name>             Remove item from current project
-    --init [--profile <name>]         Add project using a profile
+    --init [--profile <name>]         Add project using a profile (key = folder name, or --name <key>)
     --init [--from <path>]            Add project copying another's config
     --seed [--name <slug>]            Import project into bazar (initial setup)
     --link                            Register this bazar's local path on this device (~/.claude/bazar-paths.json)
@@ -1439,7 +1458,7 @@ function printUsage() {
                         (requires --category and --item)
     --profile <name>    Use a named profile (with --init)
     --from <path>       Copy config from another project (with --init)
-    --name <slug>       Slug for claude-md/settings/mcp (with --seed)
+    --name <slug>       Slug for claude-md/settings/mcp (with --seed); project key (with --init)
 
   Ignore patterns:
     Configure in map.json "ignore" key to exclude runtime artifacts from
@@ -1524,7 +1543,7 @@ async function main() {
       removeItemFromProject(projectRoot, args.category, args.item, map);
       break;
     case 'init':
-      initProject(projectRoot, args.from, args.profile, map);
+      initProject(projectRoot, args.from, args.profile, map, args.name);
       break;
     case 'seed':
       seedProject(projectRoot, args.name, map);
