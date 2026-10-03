@@ -139,10 +139,48 @@ function projItemPath(projectRoot, category, deployName) {
   return join(projectRoot, '.claude', category, deployName + '.md');
 }
 
+// The manifest is split in two files:
+//   .claude/bazar.json        committed: project identity and managed items.
+//                             Identical on every device, changes only when the
+//                             project's item list changes.
+//   .claude/bazar.state.json  gitignored: this device's sync state (last sync
+//                             time, bazar commit, base hashes). Rewritten on
+//                             every sync/push, never committed, so it can not
+//                             cause churn or merge conflicts in the project.
 const MANIFEST_FILENAME = 'bazar.json';
+const STATE_FILENAME = 'bazar.state.json';
+const STATE_GITIGNORE_LINE = `.claude/${STATE_FILENAME}`;
+const STATE_FIELDS = ['synced_at', 'bazar_commit', 'base_hashes'];
 
 function manifestPath(projectRoot) {
   return join(projectRoot, '.claude', MANIFEST_FILENAME);
+}
+
+function statePath(projectRoot) {
+  return join(projectRoot, '.claude', STATE_FILENAME);
+}
+
+// Read the manifest merged with this device's state. A legacy single-file
+// manifest still carrying the state fields is read as-is (one-time migration:
+// the next write splits it).
+function readManifest(projectRoot) {
+  const manifest = readJSON(manifestPath(projectRoot));
+  if (existsSync(statePath(projectRoot))) {
+    try {
+      const state = readJSON(statePath(projectRoot));
+      for (const f of STATE_FIELDS) if (f in state) manifest[f] = state[f];
+    } catch {}
+  }
+  return manifest;
+}
+
+function writeManifest(projectRoot, manifest) {
+  const shared = {};
+  const state = {};
+  for (const [k, v] of Object.entries(manifest)) (STATE_FIELDS.includes(k) ? state : shared)[k] = v;
+  ensureDir(join(projectRoot, '.claude'));
+  writeJSON(manifestPath(projectRoot), shared);
+  writeJSON(statePath(projectRoot), state);
 }
 
 // ── Git Operations ───────────────────────────────────────────────────────────
@@ -320,7 +358,7 @@ function syncProject(projectRoot, map) {
   let oldManifest = null;
   const mPath = manifestPath(projectRoot);
   if (existsSync(mPath)) {
-    try { oldManifest = readJSON(mPath); } catch {}
+    try { oldManifest = readManifest(projectRoot); } catch {}
   }
 
   const managed = {};
@@ -391,21 +429,23 @@ function syncProject(projectRoot, map) {
     synced++;
   }
 
-  // Sync gitignore-lines (append missing lines to root .gitignore)
+  // Sync gitignore-lines (append missing lines to root .gitignore). The
+  // per-device state file is always ignored, whatever map.json lists.
   const gitignoreLines = config['gitignore-lines'] || [];
-  if (gitignoreLines.length) {
+  {
     const giPath = join(projectRoot, '.gitignore');
     let existing = '';
     if (existsSync(giPath)) existing = readFileSync(giPath, 'utf8');
     const marker = '# bazar managed';
-    const missing = gitignoreLines.filter(line => !existing.includes(line));
+    const wanted = [STATE_GITIGNORE_LINE, ...gitignoreLines.filter(l => l !== STATE_GITIGNORE_LINE)];
+    const missing = wanted.filter(line => !existing.split(/\r?\n/).some(l => l.trim() === line));
     if (missing.length) {
       const markerLine = existing.includes(marker) ? '' : marker + '\n';
-      const append = '\n' + markerLine + missing.join('\n') + '\n';
+      const append = (existing.trim() ? '\n' : '') + markerLine + missing.join('\n') + '\n';
       writeFileSync(giPath, existing.trimEnd() + append);
       console.log(`  Appended ${missing.length} lines to .gitignore`);
     }
-    managed['gitignore-lines'] = gitignoreLines;
+    if (gitignoreLines.length) managed['gitignore-lines'] = gitignoreLines;
   }
 
   // Cleanup: remove items from old manifest no longer in map
@@ -462,7 +502,7 @@ function syncProject(projectRoot, map) {
     managed
   };
   manifest.base_hashes = computeBaseHashes(projectRoot, manifest);
-  writeJSON(mPath, manifest);
+  writeManifest(projectRoot, manifest);
 
   console.log(`  Synced ${synced} items -> ${norm(projectRoot)}`);
   return manifest;
@@ -676,7 +716,7 @@ function getChangedItems(projectRoot) {
   const mPath = manifestPath(projectRoot);
   if (!existsSync(mPath)) return [];
 
-  const manifest = readJSON(mPath);
+  const manifest = readManifest(projectRoot);
   const ignoreMap = manifest.managed.ignore || {};
   const changed = [];
 
@@ -797,7 +837,7 @@ function confirm(message) {
 async function pushProject(projectRoot, categoryFilter, itemFilter, skipConfirm, prune = false, force = false) {
   const mPath = manifestPath(projectRoot);
   if (!existsSync(mPath)) { console.error('  No manifest. Run sync first.'); process.exit(1); }
-  const manifest = readJSON(mPath);
+  const manifest = readManifest(projectRoot);
   const ignoreMap = manifest.managed.ignore || {};
 
   if (force && (!categoryFilter || !itemFilter)) {
@@ -938,7 +978,7 @@ async function pushProject(projectRoot, categoryFilter, itemFilter, skipConfirm,
       if (proj || bazar) bh[`${item.category}/${item.full}`] = { proj, bazar };
     }
     manifest.base_hashes = bh;
-    writeJSON(mPath, manifest);
+    writeManifest(projectRoot, manifest);
   }
 
   const name = basename(projectRoot);
@@ -956,7 +996,7 @@ function diffProject(projectRoot) {
   const mPath = manifestPath(projectRoot);
   if (!existsSync(mPath)) { console.error('  No manifest. Run sync first.'); process.exit(1); }
 
-  const manifest = readJSON(mPath);
+  const manifest = readManifest(projectRoot);
   const ignoreMap = manifest.managed.ignore || {};
   const rows = [];
 
@@ -1429,7 +1469,7 @@ function seedProject(projectRoot, name, map) {
     managed
   };
   manifest.base_hashes = computeBaseHashes(projectRoot, manifest);
-  writeJSON(manifestPath(projectRoot), manifest);
+  writeManifest(projectRoot, manifest);
 
   // Merge any existing rule files into master
   pushRuleFiles(projectRoot);

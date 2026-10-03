@@ -232,13 +232,23 @@ async function main() {
   let lastSyncAt =
     state && typeof state.lastSyncAt === "number" ? state.lastSyncAt : 0;
 
-  // Bootstrap: no usable lastSyncAt. Seed from manifest.synced_at, or
-  // claim "now" and skip this run so we don't push everything spuriously.
+  // Bootstrap: no usable lastSyncAt. Seed from this device's last sync time
+  // (.claude/bazar.state.json, or a legacy manifest that still carries it),
+  // or claim "now" and skip this run so we don't push everything spuriously.
   let bootstrapping = false;
   if (!lastSyncAt) {
     bootstrapping = true;
-    if (manifest.synced_at) {
-      const t = new Date(manifest.synced_at).getTime();
+    let syncedAt = manifest.synced_at;
+    try {
+      const deviceState = JSON.parse(
+        readFileSync(join(projectDir, ".claude", "bazar.state.json"), "utf-8")
+      );
+      if (deviceState.synced_at) syncedAt = deviceState.synced_at;
+    } catch {
+      /* no device state yet */
+    }
+    if (syncedAt) {
+      const t = new Date(syncedAt).getTime();
       if (Number.isFinite(t) && t > 0) {
         lastSyncAt = t;
         bootstrapping = false;

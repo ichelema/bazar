@@ -54,7 +54,7 @@ Additionally, `master-skill-rules.json` is filtered per-project during sync to p
 
 Before executing any operation:
 
-1. Read `.claude/bazar.json` for: project key (`project`), bazar remote (`bazar_remote`), managed items, last sync time, bazar commit (`bazar_commit`)
+1. Read `.claude/bazar.json` (committed) for: project key (`project`), bazar remote (`bazar_remote`), managed items. This device's sync state (last sync time `synced_at`, bazar commit `bazar_commit`, `base_hashes`) lives in `.claude/bazar.state.json`, which is gitignored and created by the first sync on each device
 2. Resolve where the bazar repo lives on this device: `~/.claude/bazar-paths.json` maps `bazar_remote` to a local path (the `CLAUDE_BAZAR_PATH` environment variable overrides it). Store this as `{bazar_path}`
 3. If the manifest is missing AND no bazar repo exists locally, the user may need initial setup. Check for the "First-Time Setup" triggers below.
 4. If the manifest is missing but a bazar repo exists, suggest `/bazar seed` or `/bazar set me up`
@@ -537,7 +537,7 @@ Every sync of a project that maps `BazarHook` re-adds missing `Stop`/`SessionSta
 
 **Diagnostic steps:**
 
-1. Check manifest exists: `.claude/bazar.json`
+1. Check manifest exists: `.claude/bazar.json` (and this device's state `.claude/bazar.state.json`; if missing, a plain sync recreates it)
 2. Verify the bazar path resolves: `~/.claude/bazar-paths.json` must contain an entry for the manifest's `bazar_remote` (or `CLAUDE_BAZAR_PATH` must be set). If not, run `node sync.mjs --link` from the bazar directory
 3. Check bazar repo status: `cd {bazar_path} && git status`
 4. Check for lock files or pending operations
