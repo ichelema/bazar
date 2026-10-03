@@ -297,6 +297,8 @@ node {bazar_path}/sync.mjs --add {category} {item} --project "{cwd}"
 node {bazar_path}/sync.mjs --add files {bazar-name} {deploy-path} --project "{cwd}"
 ```
 
+Variants of one item deploy to the same path, so a project uses only one of them: adding `react--strict` to a project that maps `react` switches it to `react--strict` (and `--add skills react` switches back). If `map.json` lists two variants of the same item (e.g. after a hand edit), sync warns and uses the last one listed.
+
 If the item doesn't exist in the bazar, ask: "That item doesn't exist in the bazar yet. Want me to create it from the local version?" Then follow the "Create New Bazar Item" workflow.
 
 ### Add Item to Multiple Projects

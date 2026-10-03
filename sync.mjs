@@ -380,7 +380,17 @@ function syncProject(projectRoot, map) {
     const items = config[cat] || [];
     managed[cat] = {};
 
+    // Two variants of the same item (e.g. `react` and `react--strict`) deploy
+    // to the same path: only the last one listed is used. Say so instead of
+    // silently overwriting.
+    const byDeploy = {};
+    for (const i of items) (byDeploy[parseItemName(i).deploy] ??= []).push(i);
+    for (const [deploy, list] of Object.entries(byDeploy)) {
+      if (list.length > 1) console.warn(`  WARN: ${cat}/${deploy} is mapped ${list.length} times (${list.join(', ')}); using ${list.at(-1)}. Run --add ${cat} <variant> to keep only one.`);
+    }
+
     for (const itemName of items) {
+      if (byDeploy[parseItemName(itemName).deploy].at(-1) !== itemName) continue;
       const { deploy, full } = parseItemName(itemName);
       const src = bazarItemPath(cat, full);
       const dest = projItemPath(projectRoot, cat, deploy);
@@ -1252,9 +1262,15 @@ function addItem(projectRoot, category, itemName, map, deployPath) {
 
   if (entry.config[category].includes(itemName)) { console.log(`  Already mapped: ${category}/${itemName}`); return; }
 
+  // Variants of one item deploy to the same path, so a project can use only
+  // one of them: adding a variant switches the project to it.
+  const { deploy } = parseItemName(itemName);
+  const replaced = entry.config[category].filter(i => parseItemName(i).deploy === deploy);
+  entry.config[category] = entry.config[category].filter(i => parseItemName(i).deploy !== deploy);
   entry.config[category].push(itemName);
   writeMap(map);
-  console.log(`  Added ${category}/${itemName} to ${entry.key}`);
+  if (replaced.length) console.log(`  ${category}/${deploy}: switched from ${replaced.join(', ')} to ${itemName} in ${entry.key}`);
+  else console.log(`  Added ${category}/${itemName} to ${entry.key}`);
   syncProject(projectRoot, map);
 }
 
