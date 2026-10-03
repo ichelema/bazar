@@ -112,17 +112,29 @@ function getAllFiles(dir, rootDir = null, syncIgnorePatterns = []) {
   return results;
 }
 
+// Feed a file into a hash ignoring line-ending style: in text files (no NUL
+// byte) CRLF counts as LF, so a file re-saved with Windows line endings is not
+// a change. Binary files are hashed byte for byte. For LF-only files the result
+// is identical to a plain byte hash.
+function updateHashWithFile(hash, filePath) {
+  const buf = readFileSync(filePath);
+  if (buf.includes(0)) hash.update(buf);
+  else hash.update(buf.toString('latin1').replace(/\r\n/g, '\n'), 'latin1');
+}
+
 function hashPath(itemPath, ignorePatterns = []) {
   if (!existsSync(itemPath)) return null;
   const stat = statSync(itemPath);
   if (stat.isFile()) {
-    return createHash('md5').update(readFileSync(itemPath)).digest('hex');
+    const hash = createHash('md5');
+    updateHashWithFile(hash, itemPath);
+    return hash.digest('hex');
   }
   const hash = createHash('md5');
   const files = getAllFiles(itemPath, null, ignorePatterns).map(f => norm(relative(itemPath, f))).sort();
   for (const f of files) {
     hash.update(f);
-    hash.update(readFileSync(join(itemPath, ...f.split('/'))));
+    updateHashWithFile(hash, join(itemPath, ...f.split('/')));
   }
   return hash.digest('hex');
 }

@@ -1,0 +1,5 @@
+# Store text files with LF in the repository on every machine, so a file
+# re-saved with CRLF never becomes a whole-file rewrite in the bazar history.
+# The working-tree line ending still follows each machine's git settings;
+# sync.mjs hashes ignore CRLF vs LF, so either style is "in sync".
+* text=auto
