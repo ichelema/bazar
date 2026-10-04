@@ -126,84 +126,9 @@ function updateHashWithFile(hash, filePath) {
   else hash.update(buf.toString('latin1').replace(/\r\n/g, '\n'), 'latin1');
 }
 
-// A project's .claude/settings.json and the bazar's settings/*.json are
-// compared without the BazarHook entries: sync adds them to the project, push
-// strips them, so the bazar's settings files stay clean.
-function isSettingsFile(p) {
-  const n = norm(p);
-  return n.endsWith('/.claude/settings.json') || norm(dirname(p)) === norm(join(BAZAR, 'settings'));
-}
-
-function isBazarHookCommand(cmd = '') {
-  return norm(cmd).includes('.claude/hooks/BazarHook/');
-}
-
-// Copy of a settings object without the BazarHook entries (and without the
-// groups/events/hooks key they leave empty).
-function stripBazarHooks(settings) {
-  if (!settings?.hooks || typeof settings.hooks !== 'object') return settings;
-  const hooks = {};
-  for (const [event, groups] of Object.entries(settings.hooks)) {
-    if (!Array.isArray(groups)) { hooks[event] = groups; continue; }
-    const kept = groups
-      .map(g => Array.isArray(g?.hooks) ? { ...g, hooks: g.hooks.filter(h => !isBazarHookCommand(h?.command)) } : g)
-      .filter(g => !Array.isArray(g?.hooks) || g.hooks.length);
-    if (kept.length) hooks[event] = kept;
-  }
-  const out = { ...settings, hooks };
-  if (!Object.keys(hooks).length) delete out.hooks;
-  return out;
-}
-
-// Write settings `src` to `dest` without the BazarHook entries (raw copy if
-// the file is not valid JSON).
-function copySettingsClean(src, dest) {
-  let data;
-  try { data = readJSON(src); } catch { copyFile(src, dest); return; }
-  ensureDir(dirname(dest));
-  writeJSON(dest, stripBazarHooks(data));
-}
-
-// `settings` in map.json is one name or a list of names. A list is merged in
-// order: objects are merged key by key, arrays are joined without duplicates,
-// any other value is taken from the last file that sets it.
-function mergeSettings(a, b) {
-  if (Array.isArray(a) && Array.isArray(b)) {
-    const out = [...a];
-    for (const v of b) if (!out.some(x => JSON.stringify(x) === JSON.stringify(v))) out.push(v);
-    return out;
-  }
-  if (a && b && typeof a === 'object' && typeof b === 'object' && !Array.isArray(a) && !Array.isArray(b)) {
-    const out = { ...a };
-    for (const [k, v] of Object.entries(b)) out[k] = k in out ? mergeSettings(out[k], v) : v;
-    return out;
-  }
-  return b;
-}
-
-// Merged content of the bazar settings files `names` (missing ones skipped).
-function combinedSettings(names) {
-  let out = {};
-  for (const n of names) {
-    const p = join(BAZAR, 'settings', n + '.json');
-    if (existsSync(p)) out = mergeSettings(out, readJSON(p));
-  }
-  return out;
-}
-
-// Hash of the bazar side of a project's settings: one file, or a merged list.
-function bazarSettingsHash(managedSettings) {
-  if (!Array.isArray(managedSettings)) return hashPath(join(BAZAR, 'settings', managedSettings + '.json'));
-  if (!managedSettings.some(n => existsSync(join(BAZAR, 'settings', n + '.json')))) return null;
-  return createHash('md5').update(JSON.stringify(stripBazarHooks(combinedSettings(managedSettings)))).digest('hex');
-}
-
 function hashPath(itemPath, ignorePatterns = []) {
   if (!existsSync(itemPath)) return null;
   const stat = statSync(itemPath);
-  if (stat.isFile() && isSettingsFile(itemPath)) {
-    try { return createHash('md5').update(JSON.stringify(stripBazarHooks(readJSON(itemPath)))).digest('hex'); } catch {}
-  }
   if (stat.isFile()) {
     const hash = createHash('md5');
     updateHashWithFile(hash, itemPath);
@@ -576,23 +501,11 @@ function syncProject(projectRoot, map) {
   }
 
   // Sync settings
-  const settingsList = [].concat(config.settings || []).filter(Boolean);
-  if (settingsList.length) {
+  if (config.settings) {
+    const src = join(BAZAR, 'settings', config.settings + '.json');
     const dest = join(projectRoot, '.claude', 'settings.json');
-    const found = settingsList.filter(n => existsSync(join(BAZAR, 'settings', n + '.json')));
-    for (const n of settingsList.filter(n => !found.includes(n))) console.warn(`  SKIP: settings/${n}.json not in bazar`);
-    if (found.length === 1 && settingsList.length === 1) {
-      copyFile(join(BAZAR, 'settings', found[0] + '.json'), dest);
-      managed.settings = found[0];
-      synced++;
-    } else if (found.length) {
-      // Combined settings are read-only in the project: push can not tell
-      // which bazar file an edit belongs to.
-      ensureDir(dirname(dest));
-      writeJSON(dest, combinedSettings(found));
-      managed.settings = found;
-      synced++;
-    }
+    if (existsSync(src)) { copyFile(src, dest); managed.settings = config.settings; synced++; }
+    else console.warn(`  SKIP: settings/${config.settings}.json not in bazar`);
   }
 
   // Sync mcp
@@ -930,12 +843,8 @@ function getChangedItems(projectRoot) {
   }
   if (manifest.managed.settings) {
     const ph = hashPath(join(projectRoot, '.claude', 'settings.json'));
-    const lh = bazarSettingsHash(manifest.managed.settings);
-    if (ph && lh && ph !== lh) {
-      if (Array.isArray(manifest.managed.settings)) {
-        console.warn(`  WARN: settings.json is combined from ${manifest.managed.settings.join(' + ')}: local edits are not pushed and the next sync replaces them. Edit settings/<name>.json in the bazar instead.`);
-      } else changed.push({ category: 'settings', deploy: 'settings.json', full: manifest.managed.settings, status: 'changed' });
-    }
+    const lh = hashPath(join(BAZAR, 'settings', manifest.managed.settings + '.json'));
+    if (ph && lh && ph !== lh) changed.push({ category: 'settings', deploy: 'settings.json', full: manifest.managed.settings, status: 'changed' });
   }
   if (manifest.managed.mcp) {
     const ph = hashPath(join(projectRoot, '.mcp.json'));
@@ -980,7 +889,7 @@ function computeBaseHashes(projectRoot, manifest) {
     for (const [deploy, full] of Object.entries(managed[cat] || {})) items.push({ category: cat, deploy, full });
   }
   if (managed['claude-md']) items.push({ category: 'claude-md', deploy: 'CLAUDE.md', full: managed['claude-md'] });
-  if (managed.settings && !Array.isArray(managed.settings)) items.push({ category: 'settings', deploy: 'settings.json', full: managed.settings });
+  if (managed.settings) items.push({ category: 'settings', deploy: 'settings.json', full: managed.settings });
   if (managed.mcp) items.push({ category: 'mcp', deploy: '.mcp.json', full: managed.mcp });
   for (const [bazarName, deployPath] of Object.entries(managed.files || {})) items.push({ category: 'files', deploy: deployPath, full: bazarName });
   for (const item of items) {
@@ -1148,8 +1057,7 @@ async function pushProject(projectRoot, categoryFilter, itemFilter, skipConfirm,
         }
       }
       pushDirSyncIgnoreAware(paths.src, paths.dest, paths.patterns, prune);
-    } else if (item.category === 'settings') copySettingsClean(paths.src, paths.dest);
-    else copyFile(paths.src, paths.dest);
+    } else copyFile(paths.src, paths.dest);
 
     pushed++;
     pushedItems.push(item);
@@ -1227,8 +1135,8 @@ function diffProject(projectRoot) {
 
   if (manifest.managed.settings) {
     const ph = hashPath(join(projectRoot, '.claude', 'settings.json'));
-    const lh = bazarSettingsHash(manifest.managed.settings);
-    rows.push({ category: 'settings', item: 'settings.json', bazar: [].concat(manifest.managed.settings).join(' + '),
+    const lh = hashPath(join(BAZAR, 'settings', manifest.managed.settings + '.json'));
+    rows.push({ category: 'settings', item: 'settings.json', bazar: manifest.managed.settings,
       status: ph === lh ? 'in-sync' : (ph && lh ? 'changed' : 'missing') });
   }
 
@@ -1325,7 +1233,7 @@ function listBazar(map) {
     if (files.length) {
       console.log(`  SETTINGS FILES (${files.length}):`);
       for (const f of files.sort()) {
-        const users = Object.entries(map.projects).filter(([, c]) => [].concat(c.settings || []).includes(f)).map(([p]) => basename(p));
+        const users = Object.entries(map.projects).filter(([, c]) => c.settings === f).map(([p]) => basename(p));
         console.log(`    ${f}${users.length ? ` <- ${users.join(', ')}` : ''}`);
       }
       console.log();
@@ -1624,8 +1532,7 @@ function importConfigFile(src, dir, ext, name, owned) {
       target = `${name}-${randomBytes(2).toString('hex')}`;
     }
   }
-  if (dir === 'settings') copySettingsClean(src, at(target));
-  else copyFile(src, at(target));
+  copyFile(src, at(target));
   if (target !== name) console.log(`  ${dir}/${name}${ext} belongs to another project, imported as ${target}${ext}`);
   return target;
 }
@@ -1678,7 +1585,7 @@ function seedProject(projectRoot, name, map) {
       if (!existsSync(src)) continue;
       // Re-seed: reuse the file this project already owns (`name` or a
       // suffixed `name-xxxx` minted by an earlier seed).
-      const own = typeof old?.[field] === 'string' ? old[field] : null;
+      const own = old?.[field];
       const owned = own && (own === name || own.startsWith(`${name}-`)) ? own : null;
       config[field] = importConfigFile(src, dir, ext, owned || name, Boolean(owned));
       written.push(join(BAZAR, dir, config[field] + ext));
