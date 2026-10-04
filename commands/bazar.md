@@ -49,6 +49,8 @@ Commands that edit `map.json` (`sync`, `--add`, `--remove`, `--init`, `--seed`) 
 | mcp       | `mcp-configs/{name}.json` | `.mcp.json`                  | file      |
 | files     | `files/{name}`            | custom path from map.json    | file      |
 
+Agents and commands can also be a **group folder**: `commands/ui-craft/` (holding `adapt.md`, ...) is mapped as `"commands": ["ui-craft"]` and deploys to `.claude/commands/ui-craft/`, where Claude Code names the commands `/ui-craft:adapt`. sync.mjs picks the form by what exists in the bazar (`ui-craft/` folder or `ui-craft.md`); both existing is a warning and the item is skipped. Variants (`ui-craft--strict/`) apply to the whole folder. Skills cannot be grouped.
+
 Additionally, `master-skill-rules.json` is filtered per-project during sync to produce `skill-rules.json`. (Agent activation rules were retired in v5.7: the SkillActivationHook no longer recommends agents, so there is no `master-agent-rules.json` and no generated `agent-rules.json`.)
 
 ## Context Gathering
@@ -344,7 +346,7 @@ This is different from "add item to project." This creates a new item IN the baz
 
 1. Identify the item: is it a local file/folder the user just built, or something to create from scratch?
 2. Copy it to the bazar:
-   - **Directory items** (skills, hooks): `cp -r .claude/{category}/{name} {bazar_path}/{category}/{name}`
+   - **Directory items** (skills, hooks, and agent/command group folders): `cp -r .claude/{category}/{name} {bazar_path}/{category}/{name}`
    - **File items** (agents, commands, rules): `cp .claude/{category}/{name}.md {bazar_path}/{category}/{name}.md`
 3. Add it to the current project's mapping in `map.json` (read map, add to the project's array, write map)
 4. If the user wants it in a profile too, add to the profile's array in `map.json`

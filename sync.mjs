@@ -27,6 +27,9 @@ const BAZAR = __dirname;
 const CATEGORIES = ['skills', 'agents', 'commands', 'hooks', 'rules'];
 const DIR_CATEGORIES = ['skills', 'hooks'];
 const FILE_CATEGORIES = ['agents', 'commands', 'rules'];
+// File categories whose item may also be a folder of .md files (a group):
+// `commands/ui-craft/` deploys as `.claude/commands/ui-craft/` (/ui-craft:<file>).
+const FOLDER_CATEGORIES = ['agents', 'commands'];
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 
@@ -142,14 +145,24 @@ function hashPath(itemPath, ignorePatterns = []) {
 
 // ── Path Resolution ──────────────────────────────────────────────────────────
 
-function bazarItemPath(category, fullName) {
-  if (DIR_CATEGORIES.includes(category)) return join(BAZAR, category, fullName);
-  return join(BAZAR, category, fullName + '.md');
+function isDirPath(p) {
+  try { return statSync(p).isDirectory(); } catch { return false; }
 }
 
-function projItemPath(projectRoot, category, deployName) {
-  if (DIR_CATEGORIES.includes(category)) return join(projectRoot, '.claude', category, deployName);
-  return join(projectRoot, '.claude', category, deployName + '.md');
+// `isDir` forces folder/file; when omitted, a FOLDER_CATEGORIES item is a
+// folder if that folder exists (bazar side) / no .md file exists (project side).
+function bazarItemPath(category, fullName, isDir) {
+  const p = join(BAZAR, category, fullName);
+  if (DIR_CATEGORIES.includes(category)) return p;
+  if (isDir ?? (FOLDER_CATEGORIES.includes(category) && isDirPath(p))) return p;
+  return p + '.md';
+}
+
+function projItemPath(projectRoot, category, deployName, isDir) {
+  const p = join(projectRoot, '.claude', category, deployName);
+  if (DIR_CATEGORIES.includes(category)) return p;
+  if (isDir ?? (FOLDER_CATEGORIES.includes(category) && !existsSync(p + '.md') && isDirPath(p))) return p;
+  return p + '.md';
 }
 
 // The manifest is split in two files:
@@ -447,16 +460,27 @@ function syncProject(projectRoot, map) {
       if (byDeploy[parseItemName(itemName).deploy].at(-1) !== itemName) continue;
       const { deploy, full } = parseItemName(itemName);
       const src = bazarItemPath(cat, full);
-      const dest = projItemPath(projectRoot, cat, deploy);
 
       if (!existsSync(src)) {
         console.warn(`  SKIP: ${cat}/${full} not in bazar`);
         continue;
       }
+      const isDir = isDirPath(src);
+      if (FOLDER_CATEGORIES.includes(cat) && isDir && existsSync(src + '.md')) {
+        console.warn(`  SKIP: ${cat}/${full} is both a folder and ${full}.md in the bazar; rename one of them`);
+        continue;
+      }
+      const dest = projItemPath(projectRoot, cat, deploy, isDir);
+      // Switching between a file variant and a folder variant: drop the old form.
+      const oldFull = oldManifest?.managed?.[cat]?.[deploy];
+      if (FOLDER_CATEGORIES.includes(cat) && oldFull && oldFull !== full) {
+        const other = projItemPath(projectRoot, cat, deploy, !isDir);
+        if (existsSync(other)) deleteItem(other);
+      }
 
       // Deploy is bazar -> project: bazar is the source of truth, so mirror
       // (prune=true) to remove files deleted upstream.
-      if (DIR_CATEGORIES.includes(cat)) pushDirSyncIgnoreAware(src, dest, getIgnorePatterns(full, map.ignore), true);
+      if (isDir) pushDirSyncIgnoreAware(src, dest, getIgnorePatterns(full, map.ignore), true);
       else copyFile(src, dest);
 
       managed[cat][deploy] = full;
@@ -836,9 +860,10 @@ function getChangedItems(projectRoot) {
 function itemPaths(projectRoot, manifest, item) {
   const ignoreMap = manifest.managed.ignore || {};
   if (CATEGORIES.includes(item.category)) {
+    const src = projItemPath(projectRoot, item.category, item.deploy);
     return {
-      src: projItemPath(projectRoot, item.category, item.deploy),
-      dest: bazarItemPath(item.category, item.full),
+      src,
+      dest: bazarItemPath(item.category, item.full, existsSync(src) ? isDirPath(src) : undefined),
       patterns: DIR_CATEGORIES.includes(item.category) ? (ignoreMap[item.deploy] || []) : []
     };
   }
@@ -1017,7 +1042,7 @@ async function pushProject(projectRoot, categoryFilter, itemFilter, skipConfirm,
       }
     }
 
-    if (DIR_CATEGORIES.includes(item.category)) {
+    if (isDirPath(paths.src)) {
       if (!prune) {
         const preserved = findDestOnly(paths.src, paths.dest, paths.patterns);
         if (preserved.length) {
@@ -1162,7 +1187,7 @@ function listBazar(map) {
     const items = [];
 
     for (const entry of entries) {
-      if (DIR_CATEGORIES.includes(cat) && entry.isDirectory()) items.push(entry.name);
+      if ((DIR_CATEGORIES.includes(cat) || FOLDER_CATEGORIES.includes(cat)) && entry.isDirectory()) items.push(entry.name);
       else if (FILE_CATEGORIES.includes(cat) && entry.isFile() && entry.name.endsWith('.md')) items.push(entry.name.replace('.md', ''));
     }
 
@@ -1171,7 +1196,7 @@ function listBazar(map) {
     console.log(`  ${cat.toUpperCase()} (${items.length}):`);
     for (const item of items.sort()) {
       const { deploy, variant } = parseItemName(item);
-      const tag = variant ? ` [variant: ${variant}]` : '';
+      const tag = (variant ? ` [variant: ${variant}]` : '') + (FOLDER_CATEGORIES.includes(cat) && isDirPath(join(catDir, item)) ? ' [folder]' : '');
       const users = Object.entries(map.projects)
         .filter(([, c]) => (c[cat] || []).includes(item))
         .map(([p]) => basename(p));
@@ -1466,12 +1491,14 @@ const ENGINE_ITEMS = { hooks: ['BazarHook'], commands: ['bazar'] };
 //                                   (deploys as `<name>` in this project only)
 //   re-seed of this project's own variant -> that variant is updated
 function importItem(cat, deploy, src, key, ownFull, map) {
-  const isDir = DIR_CATEGORIES.includes(cat);
+  const isDir = DIR_CATEGORIES.includes(cat) || isDirPath(src);
   const patterns = isDir ? getIgnorePatterns(deploy, map.ignore) : [];
-  const exists = full => existsSync(bazarItemPath(cat, full));
-  const same = full => hashPath(bazarItemPath(cat, full), patterns) === hashPath(src, patterns);
+  // Taken if either form (folder or .md) exists, so a folder never lands next
+  // to a same-named file: a different-type clash becomes a variant.
+  const exists = full => existsSync(bazarItemPath(cat, full, true)) || existsSync(bazarItemPath(cat, full, false));
+  const same = full => hashPath(bazarItemPath(cat, full, isDir), patterns) === hashPath(src, patterns);
   const place = full => {
-    const dest = bazarItemPath(cat, full);
+    const dest = bazarItemPath(cat, full, isDir);
     if (isDir) pushDirSyncIgnoreAware(src, dest, patterns, true);
     else copyFile(src, dest);
     return full;
@@ -1528,8 +1555,9 @@ function seedProject(projectRoot, name, map) {
     const catDir = join(claudeDir, dir);
     if (!existsSync(catDir)) continue;
     for (const entry of readdirSync(catDir, { withFileTypes: true })) {
-      if (isDir ? !entry.isDirectory() : !(entry.isFile() && entry.name.endsWith('.md'))) continue;
-      const deploy = isDir ? entry.name : entry.name.slice(0, -3);
+      const asDir = entry.isDirectory() && (isDir || FOLDER_CATEGORIES.includes(cat));
+      if (!asDir && (isDir || !(entry.isFile() && entry.name.endsWith('.md')))) continue;
+      const deploy = asDir ? entry.name : entry.name.slice(0, -3);
       const ownFull = (old?.[cat] || []).find(i => parseItemName(i).deploy === deploy);
       const { full, how } = importItem(cat, deploy, join(catDir, entry.name), key, ownFull, map);
       config[cat].push(full);

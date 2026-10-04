@@ -78,7 +78,7 @@ Una volta configurato, `/bazar` è la tua unica interfaccia. Basta parlare:
 
 ## Cosa gestisce
 
-Ogni categoria è salvata in una propria cartella del bazar e viene installata in un punto fisso del progetto. Skill e hook sono **cartelle intere** (tutti i file e le sottocartelle); agents, commands e rules sono **singoli file `.md`**.
+Ogni categoria è salvata in una propria cartella del bazar e viene installata in un punto fisso del progetto. Skill e hook sono **cartelle intere** (tutti i file e le sottocartelle); agents, commands e rules sono **singoli file `.md`**. Agents e commands possono essere anche una **cartella di file `.md`** (un gruppo, sincronizzato come un solo elemento).
 
 | Categoria       | Nel bazar                 | Installato in                | Unità    |
 | --------------- | ------------------------- | ---------------------------- | -------- |
@@ -91,6 +91,8 @@ Ogni categoria è salvata in una propria cartella del bazar e viene installata i
 | **Settings**    | `settings/{name}.json`    | `.claude/settings.json`      | file     |
 | **MCP configs** | `mcp-configs/{name}.json` | `.mcp.json`                  | file     |
 | **Files**       | `files/{name}`            | qualsiasi percorso scelto    | file     |
+
+Un gruppo come `commands/ui-craft/` (che contiene `adapt.md`, `audit.md`, ...) si mappa con un solo nome, `"commands": ["ui-craft"]`, e viene installato in `.claude/commands/ui-craft/`: Claude Code chiama quei comandi `/ui-craft:adapt`, `/ui-craft:audit`. I gruppi di agenti funzionano allo stesso modo (il nome di un agente viene dal campo `name` nel suo file). Bazar distingue le due forme da cosa esiste nel bazar: una cartella `ui-craft/` o un file `ui-craft.md`; se esistono entrambi l'elemento viene saltato con un avviso. Le skill non si possono raggruppare: Claude Code le trova solo in `.claude/skills/{name}/SKILL.md`.
 
 Una skill come `git-commits` viene sincronizzata per intero, compreso per esempio `references/test.md`; non puoi tracciare un singolo file al suo interno. Per escludere parti di un elemento di tipo cartella usa `ignore` in `map.json` (vedi sotto). `logs/`, `node_modules/`, `*.log`, `.DS_Store`, `Thumbs.db` e i file di stato degli hook sono sempre esclusi.
 
@@ -265,8 +267,8 @@ your-bazar/
 ├── map.json                  # URL del template, pattern ignore, profili, progetti
 ├── lib/                      # Moduli di supporto usati da sync.mjs
 ├── skills/                   # Cartelle delle skill (SKILL.md + file di supporto)
-├── agents/                   # Definizioni degli agenti (file .md)
-├── commands/                 # Slash command (file .md)
+├── agents/                   # Definizioni degli agenti (file .md o cartelle di gruppo)
+├── commands/                 # Slash command (file .md o cartelle di gruppo)
 │   └── bazar.md              # Il comando /bazar (installato nei progetti)
 ├── hooks/                    # Cartelle degli hook
 │   └── BazarHook/            # Hook di auto-sync

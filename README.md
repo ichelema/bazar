@@ -78,7 +78,7 @@ Once set up, `/bazar` is your single interface. Just talk:
 
 ## What It Manages
 
-Each category is stored in its own folder of the bazar and deployed to a fixed place in the project. Skills and hooks are **whole folders** (all files and subfolders); agents, commands and rules are **single `.md` files**.
+Each category is stored in its own folder of the bazar and deployed to a fixed place in the project. Skills and hooks are **whole folders** (all files and subfolders); agents, commands and rules are **single `.md` files**. Agents and commands can also be a **folder of `.md` files** (a group, synced as one item).
 
 | Category        | In the bazar              | Deployed to                  | Unit   |
 | --------------- | ------------------------- | ---------------------------- | ------ |
@@ -91,6 +91,8 @@ Each category is stored in its own folder of the bazar and deployed to a fixed p
 | **Settings**    | `settings/{name}.json`    | `.claude/settings.json`      | file   |
 | **MCP configs** | `mcp-configs/{name}.json` | `.mcp.json`                  | file   |
 | **Files**       | `files/{name}`            | any path you choose          | file   |
+
+A group like `commands/ui-craft/` (holding `adapt.md`, `audit.md`, ...) is mapped with one name, `"commands": ["ui-craft"]`, and deploys to `.claude/commands/ui-craft/`: Claude Code names those commands `/ui-craft:adapt`, `/ui-craft:audit`. Agent groups work the same way (an agent's name comes from the `name` field in its file). Bazar tells the two forms apart by what exists in the bazar: a `ui-craft/` folder or a `ui-craft.md` file; if both exist the item is skipped with a warning. Skills cannot be grouped: Claude Code only finds them at `.claude/skills/{name}/SKILL.md`.
 
 A skill like `git-commits` is synced as a whole, including e.g. `references/test.md`; you cannot track a single file inside it. To exclude parts of a folder item, use `ignore` in `map.json` (see below). `logs/`, `node_modules/`, `*.log`, `.DS_Store`, `Thumbs.db` and hook state files are always excluded.
 
@@ -265,8 +267,8 @@ your-bazar/
 ├── map.json                  # Template URL, ignore patterns, profiles, projects
 ├── lib/                      # Helper modules used by sync.mjs
 ├── skills/                   # Skill folders (SKILL.md + supporting files)
-├── agents/                   # Agent definitions (.md files)
-├── commands/                 # Slash commands (.md files)
+├── agents/                   # Agent definitions (.md files or group folders)
+├── commands/                 # Slash commands (.md files or group folders)
 │   └── bazar.md              # The /bazar command (deployed to projects)
 ├── hooks/                    # Hook folders
 │   └── BazarHook/            # Auto-sync hook
