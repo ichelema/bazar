@@ -220,6 +220,7 @@ The variant suffix never appears in your project, and push sends changes back to
 - `template`: where `--upgrade` fetches the engine from.
 - `ignore`: per item, path segments excluded from sync, diff and push.
 - `defaults`: same shape as a project, merged into every project at each sync (the project entry wins on the same item, file or setting). To remove a default item, remove it from `defaults`: it leaves every project.
+- `settings`: one name (`"ui-craft"`) or a list (`["ui-craft", "backend"]`). A list is merged in order (objects key by key, arrays joined without duplicates, other values from the last file). Merged settings are read-only in the project: push does not send them back, edit the files in the bazar's `settings/` instead.
 - `gitignore-lines`: lines added to the project's `.gitignore` on sync.
 - `projects.<key>.paths`: maintained automatically, per machine.
 
@@ -230,7 +231,7 @@ The `BazarHook` keeps project and bazar aligned without manual pushes.
 - **Stop** (`bazar-sync.mjs`): runs at the end of every Claude turn. A cheap scan of modification times over managed files detects local edits (by Claude, an editor or the terminal) and pushes them.
 - **SessionStart** (`bazar-session-start.mjs`): runs on startup/resume. Pushes pending local edits first, then syncs bazar -> project. If the push is refused, the sync is skipped so local edits are never overwritten.
 
-Both auto-pushes are additive. Every sync keeps the two hook entries registered in the project's `settings.json`, even when that file is managed by the bazar. Logs are in `.claude/hooks/BazarHook/logs/bazar-sync.log`.
+Both auto-pushes are additive. Every sync keeps the two hook entries registered in the project's `settings.json`, even when that file is managed by the bazar; the bazar copy (`settings/*.json`) never holds them: push strips them and diff ignores them. Logs are in `.claude/hooks/BazarHook/logs/bazar-sync.log`.
 
 To turn auto-sync off, remove the hook item (`/bazar disable auto-sync`, or `--remove hooks BazarHook` plus deleting its `Stop`/`SessionStart` entries from `settings.json`).
 

@@ -33,6 +33,7 @@ Commands that edit `map.json` (`sync`, `--add`, `--remove`, `--init`, `--seed`) 
 - **Variants**: `name--suffix` convention. `react--strict` in the bazar deploys as `react` in the project. The manifest tracks the mapping so push sends changes back to the correct variant.
 - **Profiles**: named item selections in map.json (e.g., `dev`, `ops`, `starter`). Applied with `--init --profile`.
 - **Defaults**: `map.json` top-level `defaults` (same shape as a project entry) is merged into every project at each sync. The project entry wins on the same item, file or scalar. To drop a default item from one project, it must be removed from `defaults` (it then leaves every project).
+- **Combined settings**: `"settings"` is one name or a list (`["ui-craft", "backend"]`), merged in order (objects key by key, arrays joined without duplicates, other values from the last file). A combined settings.json is read-only in the project: push warns and skips it, so edits go to `{bazar_path}/settings/<name>.json`.
 - **Auto-sync**: the BazarHook has two drivers. The `Stop` driver (`bazar-sync.mjs`) runs at the end of every Claude turn: it does a cheap mtime walk over managed files and runs `sync.mjs --push --yes` synchronously when something is newer than the last sync. The `SessionStart` driver (`bazar-session-start.mjs`) runs on startup/resume: it pushes pending local edits first, then syncs bazar -> project (and skips the sync if the push is refused, so local edits are never overwritten). Both auto-pushes are **additive and never pass `--prune`**, so an automatic sync can never delete another device's content. No manual push needed for routine edits. No detached spawning, no platform-specific code.
 
 ### What gets synced
@@ -558,9 +559,9 @@ MCP configs are stored as `mcp-configs/{name}.json` in the bazar. Platform varia
 
 **Triggers:** "disable auto-sync", "turn off bazar hook", "enable auto-sync", "turn on bazar hook"
 
-Every sync of a project that maps `BazarHook` re-adds missing `Stop`/`SessionStart` entries to `.claude/settings.json`, so deleting them by hand does not last.
+Every sync of a project that maps `BazarHook` re-adds missing `Stop`/`SessionStart` entries to `.claude/settings.json`, so deleting them by hand does not last. The bazar copy (`settings/*.json`) never holds them: push and seed strip them, and diff ignores them.
 
-- To disable: `node {bazar_path}/sync.mjs --remove hooks BazarHook --project "{cwd}"`, then remove the `Stop` entry pointing at `bazar-sync.mjs` and the `SessionStart` entry pointing at `bazar-session-start.mjs` (and from the bazar's copy too, if `settings.json` is bazar-managed)
+- To disable: `node {bazar_path}/sync.mjs --remove hooks BazarHook --project "{cwd}"`, then remove the `Stop` entry pointing at `bazar-sync.mjs` and the `SessionStart` entry pointing at `bazar-session-start.mjs`
 - To enable: `node {bazar_path}/sync.mjs --add hooks BazarHook --project "{cwd}"`; the sync registers the entries automatically
 
 ---

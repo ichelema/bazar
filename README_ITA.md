@@ -220,6 +220,7 @@ Il suffisso della variante non compare mai nel progetto, e il push rimanda le mo
 - `template`: da dove `--upgrade` scarica il motore.
 - `ignore`: per ogni elemento, le parti di percorso escluse da sync, diff e push.
 - `defaults`: stessa forma di un progetto, unita a ogni progetto a ogni sync (la voce del progetto vince sullo stesso elemento, file o impostazione). Per togliere un elemento di default, toglilo da `defaults`: sparisce da tutti i progetti.
+- `settings`: un nome (`"ui-craft"`) o una lista (`["ui-craft", "backend"]`). Una lista viene unita in ordine (oggetti chiave per chiave, liste unite senza doppioni, gli altri valori dall'ultimo file). I settings uniti sono in sola lettura nel progetto: il push non li rimanda indietro, modifica invece i file in `settings/` del bazar.
 - `gitignore-lines`: righe aggiunte al `.gitignore` del progetto durante il sync.
 - `projects.<key>.paths`: gestito automaticamente, per macchina.
 
@@ -230,7 +231,7 @@ Il suffisso della variante non compare mai nel progetto, e il push rimanda le mo
 - **Stop** (`bazar-sync.mjs`): parte alla fine di ogni turno di Claude. Un controllo veloce delle date di modifica dei file gestiti rileva le modifiche locali (fatte da Claude, da un editor o dal terminale) e le pubblica.
 - **SessionStart** (`bazar-session-start.mjs`): parte all'avvio e alla ripresa della sessione. Prima pubblica le modifiche locali in sospeso, poi sincronizza bazar -> progetto. Se il push viene rifiutato, il sync viene saltato, così le modifiche locali non vengono mai sovrascritte.
 
-Entrambi i push automatici sono additivi. Ogni sync mantiene registrate le due voci dell'hook nel `settings.json` del progetto, anche quando quel file è gestito dal bazar. I log sono in `.claude/hooks/BazarHook/logs/bazar-sync.log`.
+Entrambi i push automatici sono additivi. Ogni sync mantiene registrate le due voci dell'hook nel `settings.json` del progetto, anche quando quel file è gestito dal bazar; la copia nel bazar (`settings/*.json`) non le contiene mai: il push le toglie e il diff le ignora. I log sono in `.claude/hooks/BazarHook/logs/bazar-sync.log`.
 
 Per spegnere l'auto-sync rimuovi l'elemento hook (`/bazar disattiva l'auto-sync`, oppure `--remove hooks BazarHook` più la cancellazione delle voci `Stop`/`SessionStart` da `settings.json`).
 
