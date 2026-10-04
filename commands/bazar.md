@@ -32,6 +32,7 @@ Commands that edit `map.json` (`sync`, `--add`, `--remove`, `--init`, `--seed`) 
 - **Diff**: compares hashes between project and bazar without changing anything.
 - **Variants**: `name--suffix` convention. `react--strict` in the bazar deploys as `react` in the project. The manifest tracks the mapping so push sends changes back to the correct variant.
 - **Profiles**: named item selections in map.json (e.g., `dev`, `ops`, `starter`). Applied with `--init --profile`.
+- **Defaults**: `map.json` top-level `defaults` (same shape as a project entry) is merged into every project at each sync. The project entry wins on the same item, file or scalar. To drop a default item from one project, it must be removed from `defaults` (it then leaves every project).
 - **Auto-sync**: the BazarHook has two drivers. The `Stop` driver (`bazar-sync.mjs`) runs at the end of every Claude turn: it does a cheap mtime walk over managed files and runs `sync.mjs --push --yes` synchronously when something is newer than the last sync. The `SessionStart` driver (`bazar-session-start.mjs`) runs on startup/resume: it pushes pending local edits first, then syncs bazar -> project (and skips the sync if the push is refused, so local edits are never overwritten). Both auto-pushes are **additive and never pass `--prune`**, so an automatic sync can never delete another device's content. No manual push needed for routine edits. No detached spawning, no platform-specific code.
 
 ### What gets synced
@@ -376,6 +377,24 @@ cd {bazar_path} && git add map.json && git commit -m "add {item} to {profile} pr
 ```
 
 Note: this only affects future projects initialized with this profile. Existing projects are unchanged unless you also add the item to them individually.
+
+### Add Item to Every Project (defaults)
+
+**Triggers:** "add [item] to every project", "[item] in all projects by default", "always sync [file] everywhere"
+
+**Workflow:**
+
+1. Read `map.json`
+2. Add the item under the top-level `defaults` key (create it if missing; same shape as a project entry, e.g. `"defaults": { "files": { "CLAUDE_GPT.md": "CLAUDE_GPT.md" }, "skills": ["git-commits"] }`). Never put it inside `projects`.
+3. Write `map.json`, then commit and push:
+
+```bash
+cd {bazar_path} && git add map.json && git commit -m "defaults: add {item}" && git push
+```
+
+4. Deploy now on this device: `node {bazar_path}/sync.mjs --all`. Other devices and projects get it on their next sync.
+
+To stop it everywhere, remove it from `defaults` and sync the same way: each project deletes its copy.
 
 ---
 

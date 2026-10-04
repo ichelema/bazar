@@ -68,6 +68,7 @@ Once set up, `/bazar` is your single interface. Just talk:
 /bazar set up my-new-repo                  --> Connect another project
 /bazar create a profile called minimal     --> Reusable item selection
 /bazar add react to the dev profile        --> Update a profile
+/bazar add CLAUDE_GPT.md to every project  --> Add to "defaults" (all projects)
 /bazar is auto-sync working?               --> Check BazarHook status
 /bazar upgrade                             --> Update the engine from the template
 /bazar show everything                     --> Full inventory
@@ -177,7 +178,7 @@ The variant suffix never appears in your project, and push sends changes back to
 
 ## Profiles and map.json
 
-`map.json` describes what every project gets. Profiles are reusable selections applied with `--init --profile`.
+`map.json` describes what every project gets. Profiles are reusable selections applied with `--init --profile`: they are copied once, so later profile edits do not reach existing projects. `defaults` is applied to **every** project at each sync.
 
 ```json
 {
@@ -185,6 +186,9 @@ The variant suffix never appears in your project, and push sends changes back to
   "ignore": {
     "BazarHook": ["logs", "pending-sync.json"],
     "git-commits": ["references"]
+  },
+  "defaults": {
+    "files": { "CLAUDE_GPT.md": "CLAUDE_GPT.md" }
   },
   "profiles": {
     "dev": {
@@ -213,6 +217,7 @@ The variant suffix never appears in your project, and push sends changes back to
 
 - `template`: where `--upgrade` fetches the engine from.
 - `ignore`: per item, path segments excluded from sync, diff and push.
+- `defaults`: same shape as a project, merged into every project at each sync (the project entry wins on the same item, file or setting). To remove a default item, remove it from `defaults`: it leaves every project.
 - `gitignore-lines`: lines added to the project's `.gitignore` on sync.
 - `projects.<key>.paths`: maintained automatically, per machine.
 

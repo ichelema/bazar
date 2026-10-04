@@ -68,6 +68,7 @@ Una volta configurato, `/bazar` è la tua unica interfaccia. Basta parlare:
 /bazar configura my-new-repo                     --> Collega un altro progetto
 /bazar crea un profilo chiamato minimal          --> Selezione di elementi riutilizzabile
 /bazar aggiungi react al profilo dev             --> Aggiorna un profilo
+/bazar aggiungi CLAUDE_GPT.md a tutti i progetti --> Aggiunge a "defaults" (tutti i progetti)
 /bazar l'auto-sync funziona?                     --> Controlla lo stato di BazarHook
 /bazar aggiorna il motore                        --> Aggiorna il motore dal template
 /bazar mostra tutto                              --> Inventario completo
@@ -177,7 +178,7 @@ Il suffisso della variante non compare mai nel progetto, e il push rimanda le mo
 
 ## Profili e map.json
 
-`map.json` descrive cosa riceve ogni progetto. I profili sono selezioni riutilizzabili, applicate con `--init --profile`.
+`map.json` descrive cosa riceve ogni progetto. I profili sono selezioni riutilizzabili, applicate con `--init --profile`: vengono copiati una volta sola, quindi le modifiche successive al profilo non arrivano ai progetti esistenti. `defaults` vale per **tutti** i progetti a ogni sync.
 
 ```json
 {
@@ -185,6 +186,9 @@ Il suffisso della variante non compare mai nel progetto, e il push rimanda le mo
   "ignore": {
     "BazarHook": ["logs", "pending-sync.json"],
     "git-commits": ["references"]
+  },
+  "defaults": {
+    "files": { "CLAUDE_GPT.md": "CLAUDE_GPT.md" }
   },
   "profiles": {
     "dev": {
@@ -213,6 +217,7 @@ Il suffisso della variante non compare mai nel progetto, e il push rimanda le mo
 
 - `template`: da dove `--upgrade` scarica il motore.
 - `ignore`: per ogni elemento, le parti di percorso escluse da sync, diff e push.
+- `defaults`: stessa forma di un progetto, unita a ogni progetto a ogni sync (la voce del progetto vince sullo stesso elemento, file o impostazione). Per togliere un elemento di default, toglilo da `defaults`: sparisce da tutti i progetti.
 - `gitignore-lines`: righe aggiunte al `.gitignore` del progetto durante il sync.
 - `projects.<key>.paths`: gestito automaticamente, per macchina.
 

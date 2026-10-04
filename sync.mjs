@@ -393,16 +393,32 @@ function emptyConfig() {
   return { 'claude-md': '', settings: '', mcp: '', skills: [], agents: [], commands: [], hooks: [], rules: [], files: {}, 'gitignore-lines': [] };
 }
 
+// `map.defaults` (same shape as a project entry) applies to every project.
+// The project's own entry wins: same deploy name, same file, or a set scalar.
+function withDefaults(config, defaults) {
+  if (!defaults) return config;
+  const eff = { ...config };
+  for (const cat of CATEGORIES) {
+    const own = config[cat] || [];
+    const taken = new Set(own.map(i => parseItemName(i).deploy));
+    eff[cat] = [...(defaults[cat] || []).filter(i => !taken.has(parseItemName(i).deploy)), ...own];
+  }
+  for (const k of ['claude-md', 'settings', 'mcp']) eff[k] = config[k] || defaults[k] || '';
+  eff.files = { ...(defaults.files || {}), ...(config.files || {}) };
+  eff['gitignore-lines'] = [...new Set([...(defaults['gitignore-lines'] || []), ...(config['gitignore-lines'] || [])])];
+  return eff;
+}
+
 // ── SYNC (bazar -> project) ────────────────────────────────────────────────
 
 function syncProject(projectRoot, map) {
   const entry = findProject(map, projectRoot);
   if (!entry) projectNotFound(projectRoot);
 
-  const { config } = entry;
+  const config = withDefaults(entry.config, map.defaults);
   const claudeDir = join(projectRoot, '.claude');
   ensureDir(claudeDir);
-  if (rememberProjectPath(entry.key, config, projectRoot)) writeMap(map);
+  if (rememberProjectPath(entry.key, entry.config, projectRoot)) writeMap(map);
 
   // Read old manifest for cleanup
   let oldManifest = null;
@@ -1228,9 +1244,9 @@ function listBazar(map) {
   }
 
   // profiles
-  const profiles = map.profiles || {};
+  const profiles = { ...(map.defaults ? { '(defaults: every project)': map.defaults } : {}), ...(map.profiles || {}) };
   if (Object.keys(profiles).length) {
-    console.log(`  === Profiles ===\n`);
+    console.log(`  === Defaults and Profiles ===\n`);
     for (const [name, config] of Object.entries(profiles)) {
       const total = CATEGORIES.reduce((n, c) => n + (config[c] || []).length, 0)
         + (config['claude-md'] ? 1 : 0) + (config.settings ? 1 : 0) + (config.mcp ? 1 : 0)
@@ -1319,7 +1335,7 @@ function removeItemFromProject(projectRoot, category, itemName, map) {
   // Handle files category separately
   if (category === 'files') {
     if (!entry.config.files || !(itemName in entry.config.files)) {
-      console.error(`  Not mapped: files/${itemName}`);
+      console.error(`  Not mapped: files/${itemName}${itemName in (map.defaults?.files || {}) ? ' (it comes from "defaults" in map.json: remove it there to drop it from every project)' : ''}`);
       return;
     }
     const deployPath = entry.config.files[itemName];
@@ -1339,7 +1355,11 @@ function removeItemFromProject(projectRoot, category, itemName, map) {
   // Match by full name or deploy name
   let idx = entry.config[category].indexOf(itemName);
   if (idx === -1) idx = entry.config[category].findIndex(i => parseItemName(i).deploy === itemName);
-  if (idx === -1) { console.error(`  Not mapped: ${category}/${itemName}`); return; }
+  if (idx === -1) {
+    const fromDefaults = (map.defaults?.[category] || []).some(i => i === itemName || parseItemName(i).deploy === itemName);
+    console.error(`  Not mapped: ${category}/${itemName}${fromDefaults ? ' (it comes from "defaults" in map.json: remove it there to drop it from every project)' : ''}`);
+    return;
+  }
 
   const removed = entry.config[category].splice(idx, 1)[0];
   writeMap(map);
